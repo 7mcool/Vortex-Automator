@@ -1,9 +1,7 @@
-
-### Fichier .gitignore recommandé :
-```gitignore
 # Fichiers sensibles
+auth/*
 config/channels/*.yaml
-auth/
+!config/channels/channel.example.yaml
 *.env
 *.key
 *.json
@@ -17,3 +15,6 @@ __pycache__/
 # Environnements virtuels
 venv/
 .env/
+
+# Fichiers d'état
+publishing_state.json
