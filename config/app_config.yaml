@@ -1,0 +1,27 @@
+# config/app_config.yaml
+
+# Dossier par défaut où chercher les vidéos
+default_source_dir: 'D:/Videos'
+
+# Fichier d'état des publications
+state_file: 'publishing_state.json'
+
+# Modèle Whisper à utiliser (base, small, medium, large)
+whisper_model: 'medium'
+
+# Clé API pour DeepSeek
+deepseek_api_key: 'votre_clé_api'
+
+# Heures de publication (en heure locale UTC+1)
+publish_hours: [9, 12, 15, 18, 21]
+
+# Rétention des logs (en jours)
+log_retention_days: 30
+
+# Spécifications matérielles minimales (pour l'avertissement)
+min_ram_gb: 8
+min_vram_gb: 4
+
+# Paramètres avancés
+max_retries: 3
+temp_dir: './temp'
