@@ -1,0 +1,19 @@
+
+### Fichier .gitignore recommandé :
+```gitignore
+# Fichiers sensibles
+config/channels/*.yaml
+auth/
+*.env
+*.key
+*.json
+
+# Fichiers générés
+*.log
+*.mp4
+__pycache__/
+*.pyc
+
+# Environnements virtuels
+venv/
+.env/
