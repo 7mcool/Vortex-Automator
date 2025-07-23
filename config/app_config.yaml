@@ -1,27 +1,54 @@
-# config/app_config.yaml
+# =========================
+# Vortex Automator - Configuration globale
+# =========================
 
-# Dossier par défaut où chercher les vidéos
-default_source_dir: 'D:/Videos'
+app:
+  name: 'Vortex-Automator'
+  version: '1.0.0'
+  env: 'prod' # dev | prod, sélectionne l'environnement actif
 
-# Fichier d'état des publications
-state_file: 'publishing_state.json'
+environments:
+  dev:
+    base_path: '/path/to/dev' # Chemin racine pour cet environnement
+    logs_dir: '${base_path}/logs'
+    temp_dir: '${base_path}/temp'
+    done_videos_dir: '${base_path}/done_videos'
+    failed_uploads_dir: '${base_path}/failed_uploads'
+    auth_dir: '${base_path}/auth'
+  prod:
+    base_path: '/path/to/prod'
+    logs_dir: '${base_path}/logs'
+    temp_dir: '${base_path}/temp'
+    done_videos_dir: '${base_path}/done_videos'
+    failed_uploads_dir: '${base_path}/failed_uploads'
+    auth_dir: '${base_path}/auth'
 
-# Modèle Whisper à utiliser (base, small, medium, large)
-whisper_model: 'medium'
+upload:
+  max_simultaneous_jobs: 3 # Nombre max de tâches simultanées
+  retry_attempts: 3 # Tentatives en cas d'échec
+  retry_delay_seconds: 60 # Délai entre tentatives (secondes)
+  default_privacy: 'private' # private | unlisted | public
 
-# Clé API pour DeepSeek
-deepseek_api_key: 'votre_clé_api'
+transcription:
+  backend: 'whisper' # whisper | google | azure
+  model: 'base' # Modèle utilisé
+  language: 'auto' # auto | fr | en ...
+  batch_size: 16 # Nombre de segments traités par lot
+  include_chapters: true # Générer des chapitres automatiques
+  min_chapter_duration: 60 # Durée minimale d'un chapitre (secondes)
 
-# Heures de publication (en heure locale UTC+1)
-publish_hours: [9, 12, 15, 18, 21]
+metadata:
+  ai_provider: 'deepseek' # Fournisseur d'IA pour les métadonnées
+  prompt_template: 'Génère un titre et une description pour cette vidéo : {transcript}'
+  max_title_length: 100 # Longueur max du titre
+  max_description_length: 5000 # Longueur max de la description
+  tags_count: 15 # Nombre max de tags
+  include_hashtags: true # Ajouter des hashtags aux tags
 
-# Rétention des logs (en jours)
-log_retention_days: 30
-
-# Spécifications matérielles minimales (pour l'avertissement)
-min_ram_gb: 8
-min_vram_gb: 4
-
-# Paramètres avancés
-max_retries: 3
-temp_dir: './temp'
+scheduler:
+  default_timezone: 'Europe/Paris' # Fuseau horaire par défaut
+  enable_smart_schedule: true # Activer la planification intelligente
+  peak_hours: # Heures de forte audience
+    - '08:00'
+    - '12:00'
+    - '18:00'
