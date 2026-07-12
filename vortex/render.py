@@ -99,6 +99,20 @@ def build_ass(cfg: Config, *, width: int, height: int, duration: float,
               title: str, words_file: Path | None) -> str:
     fontname = _fontname()
 
+    # Tailles et marges relatives à la vidéo (plein écran, textes loin des bords)
+    fs_hook = int(height / 18)
+    fs_kara = int(height / 15)
+    fs_badge = int(height / 20)
+    fs_handle = int(height / 34)
+    margin_lr = int(width * 0.07)
+    # Largeur maximale des lignes CALCULÉE (bold uppercase ≈ 0,62 × fontsize par caractère)
+    hook_chars = max(int(width * 0.86 / (fs_hook * 0.62)), 8)
+    kara_chars = max(int(width * 0.86 / (fs_kara * 0.62)), 6)
+    hook_top = int(height * 0.12)
+    kara_bottom = int(height * 0.30)   # captions au centre-bas (~2/3 de la hauteur)
+    badge_bottom = int(height * 0.12)
+    handle_top = int(height * 0.03)
+
     hook = title.replace(" #Shorts", "").strip().upper()
     words = hook.split()
     if len(words) > 12:
@@ -130,20 +144,6 @@ def build_ass(cfg: Config, *, width: int, height: int, duration: float,
     hook_txt = hook_txt.rstrip(r"\N")
 
     handle = "@sophos_prophetikos"
-
-    # Tailles et marges relatives à la vidéo (plein écran, textes loin des bords)
-    fs_hook = int(height / 18)
-    fs_kara = int(height / 15)
-    fs_badge = int(height / 20)
-    fs_handle = int(height / 34)
-    margin_lr = int(width * 0.07)
-    # Largeur maximale des lignes CALCULÉE (bold uppercase ≈ 0,62 × fontsize par caractère)
-    hook_chars = max(int(width * 0.86 / (fs_hook * 0.62)), 8)
-    kara_chars = max(int(width * 0.86 / (fs_kara * 0.62)), 6)
-    hook_top = int(height * 0.12)
-    kara_bottom = int(height * 0.30)   # captions au centre-bas (~2/3 de la hauteur)
-    badge_bottom = int(height * 0.12)
-    handle_top = int(height * 0.03)
 
     header = f"""[Script Info]
 ScriptType: v4.00+
