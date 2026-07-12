@@ -197,7 +197,9 @@ def prepare_video(cfg: Config, db: Database, video_id: int) -> bool:
 
 def prepare_pending(cfg: Config, db: Database, limit: int = 0) -> int:
     done = 0
-    for row in db.by_state("TRANSCRIBED", limit=limit):
+    for row in db.by_state("TRANSCRIBED"):
+        if limit and done >= limit:
+            break
         if prepare_video(cfg, db, row["id"]):
             done += 1
     return done

@@ -77,9 +77,12 @@ def transcribe_video(cfg: Config, db: Database, video_id: int) -> bool:
 
 
 def transcribe_pending(cfg: Config, db: Database, limit: int = 0) -> int:
-    rows = db.by_state("DISCOVERED", limit=limit)
+    """Transcrit jusqu'à `limit` vidéos AVEC SUCCÈS (les fichiers absents —
+    disque débranché, pas encore synchronisés — ne consomment pas la limite)."""
     done = 0
-    for row in rows:
+    for row in db.by_state("DISCOVERED"):
+        if limit and done >= limit:
+            break
         if transcribe_video(cfg, db, row["id"]):
             done += 1
     return done
