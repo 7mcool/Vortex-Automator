@@ -191,14 +191,23 @@ def generate_thumb(cfg: Config, db: Database, video_id: int) -> bool:
     lines = _title_lines(thumb_title) if thumb_title else _title_lines(row["title"])
     txt_layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(txt_layer)
+
+    def fitted_font(line: str, size: int, max_width: int):
+        """Réduit la taille jusqu'à ce que la ligne tienne (mesure RÉELLE Pillow)."""
+        font = _font(size)
+        while size > 30 and d.textlength(line, font=font) > max_width:
+            size -= 4
+            font = _font(size)
+        return font, size
+
     if template_b:
         # Template B (cover modèle) : titre à droite, 1re moitié BLANCHE,
         # dernières lignes JAUNES, gros et droit
         x0 = int(W * 0.46)
+        max_w = W - x0 - 50
         y = 110
         for i, line in enumerate(lines):
-            size = 78 if i < len(lines) - 2 else 92
-            font = _font(size)
+            font, size = fitted_font(line, 78 if i < len(lines) - 2 else 92, max_w)
             color = WHITE if i < max(len(lines) - 2, 1) else GOLD
             for dx, dy in ((4, 4), (2, 2)):
                 d.text((x0 + dx, y + dy), line, font=font, fill=(0, 0, 0, 210))
@@ -207,10 +216,10 @@ def generate_thumb(cfg: Config, db: Database, video_id: int) -> bool:
         canvas.alpha_composite(txt_layer)
     else:
         # Template A : titre penché à gauche, 1re ligne OR, suite BLANC
+        max_w = int(W * 0.58)
         y = 90
         for i, line in enumerate(lines):
-            size = 86 if i == 0 else 72
-            font = _font(size)
+            font, size = fitted_font(line, 86 if i == 0 else 72, max_w)
             color = GOLD if i == 0 else WHITE
             for dx, dy in ((4, 4), (2, 2)):
                 d.text((70 + dx, y + dy), line, font=font, fill=(0, 0, 0, 230))
@@ -249,10 +258,11 @@ def thumbs_pending(cfg: Config, db: Database, limit: int = 0) -> int:
     if "thumb_path" not in cols:
         db.conn.execute("ALTER TABLE videos ADD COLUMN thumb_path TEXT")
         db.conn.commit()
+    # Les Shorts n'ont pas vraiment besoin de cover (le flux Shorts montre la
+    # vidéo, pas la miniature) : on génère d'abord pour les vidéos longues.
     rows = db.conn.execute(
         "SELECT id FROM videos WHERE state = 'READY' AND thumb_path IS NULL "
-        "ORDER BY CASE WHEN duration_s BETWEEN 30 AND 180 THEN 0 ELSE 1 END, "
-        "duration_s DESC").fetchall()
+        "AND category != 'short' ORDER BY duration_s DESC").fetchall()
     done = 0
     for r in rows:
         if limit and done >= limit:
