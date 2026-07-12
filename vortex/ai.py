@@ -47,6 +47,8 @@ et partager. Termine par 3 à 5 hashtags pertinents (#foi #motivation…)
 - "tags" : liste de 12 à 15 mots-clés français pertinents (2-3 mots max chacun, total < 450 caractères)
 - "hook" : la phrase la plus percutante du message, corrigée, max 100 caractères
 - "speaker" : le nom de l'orateur SI clairement identifié, sinon chaîne vide ""
+- "thumb_title" : titre ULTRA-COURT pour la miniature (4 à 6 mots, choc, MAJUSCULES naturelles, \
+sans ponctuation finale) — ex : « Les ennemis de la foi »
 
 Réponds UNIQUEMENT avec le JSON."""
 
@@ -105,6 +107,7 @@ def generate_metadata(channel: str, speakers: list[str], caption: str, transcrip
                 "tags": tags[:15],
                 "hook": hook[:100],
                 "speaker": str(data.get("speaker", "")).strip(),
+                "thumb_title": str(data.get("thumb_title", "")).strip()[:60],
             }
         except (urllib.error.URLError, urllib.error.HTTPError, KeyError,
                 ValueError, json.JSONDecodeError) as exc:

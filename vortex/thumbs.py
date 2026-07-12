@@ -51,11 +51,14 @@ def _font(size: int, bold: bool = True):
     return ImageFont.load_default()
 
 
-def _gradient_bg(video_id: int = 0):
+BLUE_B = ((10, 40, 140), (24, 80, 220), (70, 140, 255))  # template B (cover modèle de Michel)
+
+
+def _gradient_bg(video_id: int = 0, palette=None, halo_x: float = 0.72):
     """Fond en dégradé diagonal + halo lumineux — palette variée par vidéo."""
     from PIL import Image
     import math
-    dark, mid, light = PALETTES[video_id % len(PALETTES)]
+    dark, mid, light = palette or PALETTES[video_id % len(PALETTES)]
     bg = Image.new("RGB", (W, H))
     px = bg.load()
     for y in range(H):
@@ -64,8 +67,8 @@ def _gradient_bg(video_id: int = 0):
             r = int(dark[0] + (mid[0] - dark[0]) * t)
             g = int(dark[1] + (mid[1] - dark[1]) * t)
             b = int(dark[2] + (mid[2] - dark[2]) * t)
-            # halo autour du tiers droit (là où sera la photo)
-            d = math.hypot((x - W * 0.72) / W, (y - H * 0.45) / H)
+            # halo là où sera la photo
+            d = math.hypot((x - W * halo_x) / W, (y - H * 0.45) / H)
             glow = max(0, 1 - d * 2.2) * 0.55
             r = min(255, int(r + (light[0] - r) * glow))
             g = min(255, int(g + (light[1] - g) * glow))
@@ -170,31 +173,53 @@ def generate_thumb(cfg: Config, db: Database, video_id: int) -> bool:
     if not _extract_frame(str(src), (row["duration_s"] or 30) * 0.3, tmp_frame):
         return False
 
-    canvas = _gradient_bg(video_id).convert("RGBA")
+    # Titre : version courte DeepSeek si disponible, sinon repli sur le titre long
+    thumb_title = row["thumb_title"] if "thumb_title" in row.keys() and row["thumb_title"] else None
+    template_b = video_id % 2 == 1  # alternance A/B (violet penché / bleu modèle Michel)
+
+    if template_b:
+        canvas = _gradient_bg(palette=BLUE_B, halo_x=0.26).convert("RGBA")
+    else:
+        canvas = _gradient_bg(video_id).convert("RGBA")
     _paste_logo(canvas)
     subject = _cutout(tmp_frame)
-    # photo aux 2/3 droits, calée en bas
     ratio = min(680 / subject.height, 620 / subject.width)
     subject = subject.resize((int(subject.width * ratio), int(subject.height * ratio)))
-    canvas.alpha_composite(subject, (W - subject.width - 40, H - subject.height))
+    subject_x = 30 if template_b else W - subject.width - 40
+    canvas.alpha_composite(subject, (subject_x, H - subject.height))
 
-    # titre penché à gauche : 1re ligne OR, suite BLANC, ombre noire
-    lines = _title_lines(row["title"])
+    lines = _title_lines(thumb_title) if thumb_title else _title_lines(row["title"])
     txt_layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(txt_layer)
-    y = 90
-    for i, line in enumerate(lines):
-        size = 86 if i == 0 else 72
-        font = _font(size)
-        color = GOLD if i == 0 else WHITE
-        for dx, dy in ((4, 4), (2, 2)):
-            d.text((70 + dx, y + dy), line, font=font, fill=(0, 0, 0, 230))
-        d.text((70, y), line, font=font, fill=color + (255,))
-        y += size + 18
-    txt_layer = txt_layer.rotate(3, resample=Image.BICUBIC, center=(W // 3, H // 2))
-    canvas.alpha_composite(txt_layer)
+    if template_b:
+        # Template B (cover modèle) : titre à droite, 1re moitié BLANCHE,
+        # dernières lignes JAUNES, gros et droit
+        x0 = int(W * 0.46)
+        y = 110
+        for i, line in enumerate(lines):
+            size = 78 if i < len(lines) - 2 else 92
+            font = _font(size)
+            color = WHITE if i < max(len(lines) - 2, 1) else GOLD
+            for dx, dy in ((4, 4), (2, 2)):
+                d.text((x0 + dx, y + dy), line, font=font, fill=(0, 0, 0, 210))
+            d.text((x0, y), line, font=font, fill=color + (255,))
+            y += size + 16
+        canvas.alpha_composite(txt_layer)
+    else:
+        # Template A : titre penché à gauche, 1re ligne OR, suite BLANC
+        y = 90
+        for i, line in enumerate(lines):
+            size = 86 if i == 0 else 72
+            font = _font(size)
+            color = GOLD if i == 0 else WHITE
+            for dx, dy in ((4, 4), (2, 2)):
+                d.text((70 + dx, y + dy), line, font=font, fill=(0, 0, 0, 230))
+            d.text((70, y), line, font=font, fill=color + (255,))
+            y += size + 18
+        txt_layer = txt_layer.rotate(3, resample=Image.BICUBIC, center=(W // 3, H // 2))
+        canvas.alpha_composite(txt_layer)
 
-    # badge doré en bas à gauche
+    # badge doré (à droite pour B, à gauche pour A)
     badge_txt = cfg.channel_name.upper()
     bfont = _font(40)
     bbox = d.textbbox((0, 0), badge_txt, font=bfont)
@@ -204,7 +229,8 @@ def generate_thumb(cfg: Config, db: Database, video_id: int) -> bool:
     bd.rounded_rectangle([0, 0, bw, bh], radius=bh // 2, fill=GOLD + (255,),
                          outline=(255, 255, 255, 255), width=4)
     bd.text((30, 14), badge_txt, font=bfont, fill=(20, 5, 30, 255))
-    canvas.alpha_composite(badge, (60, H - bh - 46))
+    badge_x = W - bw - 60 if template_b else 60
+    canvas.alpha_composite(badge, (badge_x, H - bh - 46))
 
     canvas.convert("RGB").save(out, "JPEG", quality=88)
     tmp_frame.unlink(missing_ok=True)
