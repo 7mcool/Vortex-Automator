@@ -48,12 +48,15 @@ CTA_BLOCKS = [
 ]
 
 
-def clean_caption(caption: str | None, author: str) -> str:
-    """Nettoie la légende TikTok : retire les hashtags, les mentions d'auteur répétées."""
+def clean_caption(caption: str | None, speakers: list[str]) -> str:
+    """Nettoie la légende TikTok : retire les hashtags, les mentions d'orateurs répétées."""
     if not caption:
         return ""
     text = re.sub(r"#\S+", "", caption)
-    text = text.replace("Ev. ", "").replace(author, "").strip(" -–—:;,.")
+    text = text.replace("Ev. ", "")
+    for name in speakers:
+        text = text.replace(name, "")
+    text = text.strip(" -–—:;,.")
     return re.sub(r"\s{2,}", " ", text).strip()
 
 
@@ -86,10 +89,10 @@ def extract_keywords(text: str, count: int) -> list[str]:
 
 
 def build_title(cfg: Config, video_id: int, caption: str, transcript: str, is_short: bool) -> str:
-    base = clean_caption(caption, cfg.author_name) or first_sentences(transcript, 80)
+    base = clean_caption(caption, cfg.known_speakers) or first_sentences(transcript, 80)
     if not base.strip():
         # Titre de secours : jamais de titre vide (l'API rejette) ni trompeur.
-        base = f"Message de {cfg.author_name}"
+        base = f"Message de foi — {cfg.channel_name}"
     lead = TITLE_LEADS[video_id % len(TITLE_LEADS)]
     suffix = " #Shorts" if is_short else ""
     budget = cfg.max_title_len - len(lead) - len(suffix)
@@ -98,20 +101,20 @@ def build_title(cfg: Config, video_id: int, caption: str, transcript: str, is_sh
 
 
 def build_description(cfg: Config, caption: str, transcript: str, video_id: int) -> str:
-    hook = clean_caption(caption, cfg.author_name) or first_sentences(transcript, 160)
+    hook = clean_caption(caption, cfg.known_speakers) or first_sentences(transcript, 160)
     excerpt = first_sentences(transcript, 400)
     cta = CTA_BLOCKS[video_id % len(CTA_BLOCKS)]
     hashtags = " ".join(cfg.hashtags)
     parts = [hook]
     if excerpt and excerpt != hook:
         parts.append(f"Extrait : {excerpt}")
-    parts += [f"Un message de {cfg.author_name}.\n{cta}", hashtags]
+    parts += [f"Un message pour ta foi, sur {cfg.channel_name}.\n{cta}", hashtags]
     description = "\n\n".join(p for p in parts if p.strip())
     return description[:4900]  # marge sous la limite de 5000 octets de l'API
 
 
 def build_tags(cfg: Config, caption: str, transcript: str) -> list[str]:
-    tags = [cfg.author_name, cfg.channel_name, "motivation chrétienne", "foi", "prédication"]
+    tags = [cfg.channel_name, "motivation chrétienne", "foi", "prédication", "parole de Dieu"]
     tags += extract_keywords(f"{caption} {transcript}", cfg.tags_count)
     seen, out = set(), []
     for t in tags:
@@ -152,7 +155,7 @@ def prepare_video(cfg: Config, db: Database, video_id: int) -> bool:
         db.set_state(video_id, "BLOCKED", "ni transcription ni légende exploitable")
         return False
     ok, reason = transcript_quality(transcript)
-    usable_caption = clean_caption(row["caption"], cfg.author_name)
+    usable_caption = clean_caption(row["caption"], cfg.known_speakers)
     if not ok and not usable_caption:
         db.set_state(video_id, "BLOCKED", f"contrôle qualité : {reason}")
         log.warning("Bloquée [%d] %s : %s", video_id, row["name"], reason)
@@ -170,7 +173,7 @@ def prepare_video(cfg: Config, db: Database, video_id: int) -> bool:
     generated = None
     if ai.available():
         generated = ai.generate_metadata(
-            cfg.channel_name, cfg.author_name, caption, transcript,
+            cfg.channel_name, cfg.known_speakers, caption, transcript,
             row["duration_s"] or 0,
         )
     if generated:

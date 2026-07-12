@@ -23,7 +23,12 @@ API_URL = "https://api.deepseek.com/chat/completions"
 MODEL = "deepseek-chat"
 
 PROMPT = """Tu es l'éditeur YouTube de la chaîne « {channel} », dédiée aux prédications et \
-à la motivation chrétienne de {author} (en français, public francophone d'Afrique de l'Ouest).
+à la motivation chrétienne (en français, public francophone d'Afrique de l'Ouest).
+
+ATTENTION — ORATEUR : les vidéos montrent différents prédicateurs (souvent l'un de : {speakers}). \
+N'attribue un nom à la prédication QUE si l'orateur est clairement identifiable dans la légende \
+ou la transcription (il se nomme, ou la légende le nomme). {speaker_hint}\
+En cas de doute, n'emploie AUCUN nom propre : dis « le pasteur » ou « ce serviteur de Dieu ».
 
 Voici les données d'une vidéo verticale de {duration:.0f} secondes :
 
@@ -41,6 +46,7 @@ sans guillemets ni emoji, sans le mot Shorts (il sera ajouté automatiquement)
 et partager. Termine par 3 à 5 hashtags pertinents (#foi #motivation…)
 - "tags" : liste de 12 à 15 mots-clés français pertinents (2-3 mots max chacun, total < 450 caractères)
 - "hook" : la phrase la plus percutante du message, corrigée, max 100 caractères
+- "speaker" : le nom de l'orateur SI clairement identifié, sinon chaîne vide ""
 
 Réponds UNIQUEMENT avec le JSON."""
 
@@ -49,15 +55,21 @@ def available() -> bool:
     return bool(os.environ.get("DEEPSEEK_API_KEY"))
 
 
-def generate_metadata(channel: str, author: str, caption: str, transcript: str,
-                      duration: float) -> dict | None:
-    """Retourne {title, description, tags, hook} ou None si l'IA est indisponible."""
+def generate_metadata(channel: str, speakers: list[str], caption: str, transcript: str,
+                      duration: float, speaker_override: str = "") -> dict | None:
+    """Retourne {title, description, tags, hook, speaker} ou None si l'IA est indisponible.
+
+    speaker_override : orateur confirmé par un humain (prioritaire sur la détection)."""
     key = os.environ.get("DEEPSEEK_API_KEY")
     if not key:
         return None
 
+    speaker_hint = ""
+    if speaker_override:
+        speaker_hint = f"Pour CETTE vidéo, l'orateur confirmé est : {speaker_override}. "
     prompt = PROMPT.format(
-        channel=channel, author=author, duration=duration,
+        channel=channel, speakers=", ".join(speakers), speaker_hint=speaker_hint,
+        duration=duration,
         caption=(caption or "(vide)")[:1500],
         transcript=(transcript or "(vide)")[:6000],
     )
@@ -92,6 +104,7 @@ def generate_metadata(channel: str, author: str, caption: str, transcript: str,
                 "description": description[:4800],
                 "tags": tags[:15],
                 "hook": hook[:100],
+                "speaker": str(data.get("speaker", "")).strip(),
             }
         except (urllib.error.URLError, urllib.error.HTTPError, KeyError,
                 ValueError, json.JSONDecodeError) as exc:

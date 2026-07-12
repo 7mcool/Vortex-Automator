@@ -56,8 +56,8 @@ class Config:
 
     # SEO
     channel_name: str = "Sophos PropheTikos"
-    author_name: str = "Jacques Amessan"
-    hashtags: list[str] = field(default_factory=lambda: ["#foi", "#motivation", "#Shorts"])
+    known_speakers: list[str] = field(default_factory=lambda: ["Jacques Amessan", "Mohammed Sanogo"])
+    hashtags: list[str] = field(default_factory=lambda: ["#foi", "#motivation", "#predication"])
     max_title_len: int = 95
     tags_count: int = 15
 
@@ -127,8 +127,8 @@ def load_config(config_file: Path | None = None) -> Config:
         whisper_device=whisper.get("device", "cpu"),
         whisper_compute=whisper.get("compute_type", "int8"),
         channel_name=seo.get("channel_name", "Sophos PropheTikos"),
-        author_name=seo.get("author_name", "Jacques Amessan"),
-        hashtags=list(seo.get("hashtags", ["#foi", "#motivation", "#Shorts"])),
+        known_speakers=list(seo.get("known_speakers", ["Jacques Amessan", "Mohammed Sanogo"])),
+        hashtags=list(seo.get("hashtags", ["#foi", "#motivation", "#predication"])),
         max_title_len=int(seo.get("max_title_len", 95)),
         tags_count=int(seo.get("tags_count", 15)),
         shorts_max_seconds=int(video.get("shorts_max_seconds", 180)),
