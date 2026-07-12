@@ -18,6 +18,7 @@ for P in $PROFILES; do
   [ -n "$P" ] || continue
   echo "--- profil TikTok : @$P ---"
   yt-dlp \
+    --format "bv*+ba/b" --merge-output-format mp4 \
     --download-archive "$VIDEOS_DIR/.yt-dlp-archive.txt" \
     --output "$VIDEOS_DIR/${P}_%(timestamp)s_%(id)s.%(ext)s" \
     --write-info-json \

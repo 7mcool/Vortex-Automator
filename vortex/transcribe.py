@@ -54,6 +54,11 @@ def transcribe_video(cfg: Config, db: Database, video_id: int) -> bool:
         segments_iter, info = model.transcribe(str(path), vad_filter=True,
                                                word_timestamps=True)
         segments = list(segments_iter)
+    except IndexError:
+        # PyAV : pas de piste audio dans le fichier (téléchargement vidéo-seul)
+        log.error("Aucune piste audio dans %s — fichier à retélécharger", row["name"])
+        db.set_state(video_id, "BLOCKED", "aucune piste audio (téléchargement vidéo-seul)")
+        return False
     except Exception as exc:
         log.error("Transcription échouée pour %s : %s", row["name"], exc)
         db.set_state(video_id, "FAILED", f"transcription : {exc}")
