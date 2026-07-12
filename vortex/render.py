@@ -57,6 +57,78 @@ def _wrap(text: str, width: int = 26, max_lines: int = 3) -> str:
     return "\n".join(lines)
 
 
+def _ass_time(seconds: float) -> str:
+    seconds = max(seconds, 0)
+    h, rem = divmod(int(seconds * 100), 360000)
+    m, rem = divmod(rem, 6000)
+    s, cs = divmod(rem, 100)
+    return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
+
+
+def build_ass(cfg: Config, *, width: int, height: int, duration: float,
+              title: str, lifted: bool) -> str:
+    """Habillage professionnel via sous-titres ASS (libass) :
+    - accroche avec contour noir épais + premiers mots en OR (lisible sur tout fond),
+      fondu d'apparition/disparition ;
+    - badge rouge « S'ABONNER » façon bouton YouTube (milieu + fin de vidéo) ;
+    - filigrane discret permanent.
+    `lifted` remonte les badges quand la vidéo a déjà des sous-titres en bas."""
+    fontname = "Arial" if Path(r"C:\Windows\Fonts\arial.ttf").exists() else "DejaVu Sans"
+
+    hook = title.replace(" #Shorts", "").strip()
+    words = hook.split()
+    gold_part = " ".join(words[:3])
+    rest_part = " ".join(words[3:])
+    # \N tous les ~20 caractères pour rester dans le cadre
+    def wrap_ass(text: str, w: int = 20) -> str:
+        lines, cur = [], ""
+        for word in text.split():
+            if len(cur) + len(word) + 1 > w and cur:
+                lines.append(cur)
+                cur = word
+            else:
+                cur = f"{cur} {word}".strip()
+        if cur:
+            lines.append(cur)
+        return r"\N".join(lines[:4])
+
+    gold = r"{\c&H00D7FF&}"     # or (BGR)
+    white = r"{\c&HFFFFFF&}"
+    hook_txt = gold + wrap_ass(gold_part) + (r"\N" + white + wrap_ass(rest_part) if rest_part else "")
+
+    fs_hook = int(height / 16)
+    fs_badge = int(height / 26)
+    fs_brand = int(height / 42)
+    margin_badge = int(height * (0.30 if lifted else 0.12))
+
+    cta_start = max(duration - 3.5, duration * 0.66)
+    mid_start = duration * 0.45
+    mid_end = min(mid_start + 2.8, cta_start - 0.8)
+
+    header = f"""[Script Info]
+ScriptType: v4.00+
+PlayResX: {width}
+PlayResY: {height}
+WrapStyle: 2
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Hook,{fontname},{fs_hook},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0.5,0,1,4,2,8,30,30,{int(height * 0.10)},1
+Style: Badge,{fontname},{fs_badge},&H00FFFFFF,&H00FFFFFF,&H002313E6,&H002313E6,-1,0,0,0,100,100,1,0,3,10,0,2,30,30,{margin_badge},1
+Style: Brand,{fontname},{fs_brand},&H64FFFFFF,&H64FFFFFF,&H64000000,&H00000000,-1,0,0,0,100,100,1,0,1,2,0,8,30,30,{int(height * 0.015)},1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+    events = [
+        f"Dialogue: 1,{_ass_time(0.3)},{_ass_time(4.5)},Hook,,0,0,0,,{{\\fad(250,300)}}{hook_txt}",
+        f"Dialogue: 1,{_ass_time(mid_start)},{_ass_time(mid_end)},Badge,,0,0,0,,{{\\fad(200,200)}}► S'ABONNER",
+        f"Dialogue: 1,{_ass_time(cta_start)},{_ass_time(duration)},Badge,,0,0,0,,{{\\fad(250,0)}}❤ ABONNE-TOI ✚ PARTAGE",
+        f"Dialogue: 0,{_ass_time(0)},{_ass_time(duration)},Brand,,0,0,0,,{cfg.channel_name}",
+    ]
+    return header + "\n".join(events) + "\n"
+
+
 def render_video(cfg: Config, db: Database, video_id: int) -> bool:
     row = db.get(video_id)
     if row is None:
@@ -71,49 +143,21 @@ def render_video(cfg: Config, db: Database, video_id: int) -> bool:
     exports.mkdir(parents=True, exist_ok=True)
     out = exports / f"{row['name']}_v.mp4"
 
+    duration = row["duration_s"] or 30
+    width = row["width"] or 576
+    height = row["height"] or 1024
+
+    ass_file = exports / f"{row['name']}.ass"
+    ass_file.write_text(
+        build_ass(cfg, width=width, height=height, duration=duration,
+                  title=row["title"] or "", lifted=has_text in ("texte", "douteux")),
+        encoding="utf-8")
+
     def _ffpath(p: str) -> str:
         return p.replace("\\", "/").replace(":", r"\:")
 
-    font = _ffpath(find_font())
-    duration = row["duration_s"] or 30
-
-    # Le hook passe par un fichier texte : les apostrophes/caractères des titres
-    # français cassent l'échappement en ligne du filtre drawtext.
-    # Largeur : 18 caractères par ligne à fontsize h/26 tiennent dans une
-    # vidéo verticale (vérifié sur 576×1024 — le débordement du 1er essai
-    # venait de 26 chars à h/22).
-    hook = (row["title"] or "").replace(" #Shorts", "").strip()
-    hook_file = exports / f"{row['name']}_hook.txt"
-    hook_file.write_text(_wrap(hook, width=18, max_lines=4), encoding="utf-8")
-    cta_txt = "Abonne-toi + et partage"
-    mid_txt = "Abonne-toi pour la suite"
-    brand_txt = _esc(cfg.channel_name)
-    cta_start = max(duration - 3.5, duration * 0.66)
-    mid_start = duration * 0.45
-    mid_end = min(mid_start + 3.0, cta_start - 1)
-    # Si la vidéo a déjà des sous-titres (souvent en bas/centre), on remonte les
-    # bandeaux pour ne pas les chevaucher — on n'efface jamais rien.
-    lifted = has_text in ("texte", "douteux")
-    cta_y = "h-7*text_h" if lifted else "h-3*text_h"
-
-    vf = (
-        # Accroche : 0 -> 4 s, centrée dans le tiers haut, fond noir léger
-        f"drawtext=fontfile='{font}':textfile='{_ffpath(str(hook_file))}':fontsize=h/26:fontcolor=white:"
-        f"box=1:boxcolor=black@0.55:boxborderw=16:x=(w-text_w)/2:y=h/7:"
-        f"enable='lt(t,4)',"
-        # Rappel bref en milieu de vidéo
-        f"drawtext=fontfile='{font}':text='{mid_txt}':fontsize=h/32:fontcolor=white:"
-        f"box=1:boxcolor=black@0.5:boxborderw=10:x=(w-text_w)/2:y={cta_y}:"
-        f"enable='between(t,{mid_start:.1f},{mid_end:.1f})',"
-        # CTA fin de vidéo
-        f"drawtext=fontfile='{font}':text='{cta_txt}':fontsize=h/30:fontcolor=white:"
-        f"box=1:boxcolor=black@0.5:boxborderw=12:x=(w-text_w)/2:y={cta_y}:"
-        f"enable='gt(t,{cta_start:.1f})',"
-        # Filigrane discret permanent
-        f"drawtext=fontfile='{font}':text='{brand_txt}':fontsize=h/42:fontcolor=white@0.5:"
-        f"x=(w-text_w)/2:y=h/40"
-    )
-    cmd = [find_ffmpeg(), "-v", "error", "-i", str(src), "-vf", vf,
+    cmd = [find_ffmpeg(), "-v", "error", "-i", str(src),
+           "-vf", f"ass='{_ffpath(str(ass_file))}'",
            "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
            "-c:a", "copy", "-movflags", "+faststart", "-y", str(out)]
     try:
@@ -122,7 +166,7 @@ def render_video(cfg: Config, db: Database, video_id: int) -> bool:
         log.error("Rendu échoué pour %s : %s", row["name"], exc.stderr[-400:] if exc.stderr else exc)
         return False
     finally:
-        hook_file.unlink(missing_ok=True)
+        ass_file.unlink(missing_ok=True)
 
     cols = [r[1] for r in db.conn.execute("PRAGMA table_info(videos)")]
     if "render_path" not in cols:

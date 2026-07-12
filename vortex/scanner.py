@@ -137,6 +137,11 @@ def scan(cfg: Config, db: Database) -> dict:
             name = path.stem
             tiktok_id = name.split("_")[-1]
             cover = cover_dir / f"{name}_cover.jpeg"
+            if not cover.exists():
+                # Miniature yt-dlp pas encore déplacée dans cover/
+                alt = path.parent / f"{name}.jpg"
+                if alt.exists():
+                    cover = alt
 
             # Légende : base 4K Tokkit (PC) OU fichier .info.json de yt-dlp (VPS)
             caption = captions.get(tiktok_id)
