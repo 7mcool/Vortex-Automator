@@ -87,11 +87,14 @@ def extract_keywords(text: str, count: int) -> list[str]:
 
 def build_title(cfg: Config, video_id: int, caption: str, transcript: str, is_short: bool) -> str:
     base = clean_caption(caption, cfg.author_name) or first_sentences(transcript, 80)
+    if not base.strip():
+        # Titre de secours : jamais de titre vide (l'API rejette) ni trompeur.
+        base = f"Message de {cfg.author_name}"
     lead = TITLE_LEADS[video_id % len(TITLE_LEADS)]
     suffix = " #Shorts" if is_short else ""
     budget = cfg.max_title_len - len(lead) - len(suffix)
-    title = lead + first_sentences(base, budget) + suffix
-    return title.strip()
+    title = (lead + first_sentences(base, budget) + suffix).strip()
+    return title[:100]  # limite dure de l'API YouTube
 
 
 def build_description(cfg: Config, caption: str, transcript: str, video_id: int) -> str:
@@ -99,13 +102,12 @@ def build_description(cfg: Config, caption: str, transcript: str, video_id: int)
     excerpt = first_sentences(transcript, 400)
     cta = CTA_BLOCKS[video_id % len(CTA_BLOCKS)]
     hashtags = " ".join(cfg.hashtags)
-    return (
-        f"{hook}\n\n"
-        f"Extrait : {excerpt}\n\n"
-        f"Un message de {cfg.author_name}.\n"
-        f"{cta}\n\n"
-        f"{hashtags}"
-    )
+    parts = [hook]
+    if excerpt and excerpt != hook:
+        parts.append(f"Extrait : {excerpt}")
+    parts += [f"Un message de {cfg.author_name}.\n{cta}", hashtags]
+    description = "\n\n".join(p for p in parts if p.strip())
+    return description[:4900]  # marge sous la limite de 5000 octets de l'API
 
 
 def build_tags(cfg: Config, caption: str, transcript: str) -> list[str]:
@@ -120,6 +122,24 @@ def build_tags(cfg: Config, caption: str, transcript: str) -> list[str]:
     return out[: cfg.tags_count + 5]
 
 
+def transcript_quality(text: str) -> tuple[bool, str]:
+    """Garde-fou : rejette les transcriptions vides, trop courtes ou aberrantes
+    (vidéos musicales, bruit, hallucinations Whisper en caractères exotiques)."""
+    text = text.strip()
+    words = re.findall(r"[a-zà-öø-ÿA-ZÀ-Ö]{2,}", text)
+    if len(words) < 8:
+        return False, f"transcription trop pauvre ({len(words)} mots)"
+    letters = sum(1 for c in text if c.isalpha() or c in " .,!?'’-…")
+    if letters / max(len(text), 1) < 0.75:
+        return False, "transcription aberrante (caractères non textuels majoritaires)"
+    freq: dict[str, int] = {}
+    for c in text.replace(" ", ""):
+        freq[c] = freq.get(c, 0) + 1
+    if freq and max(freq.values()) / max(len(text.replace(" ", "")), 1) > 0.4:
+        return False, "transcription aberrante (caractère répété)"
+    return True, ""
+
+
 def prepare_video(cfg: Config, db: Database, video_id: int) -> bool:
     """TRANSCRIBED -> READY : génère titre/description/tags."""
     row = db.get(video_id)
@@ -131,6 +151,14 @@ def prepare_video(cfg: Config, db: Database, video_id: int) -> bool:
     if not transcript and not row["caption"]:
         db.set_state(video_id, "BLOCKED", "ni transcription ni légende exploitable")
         return False
+    ok, reason = transcript_quality(transcript)
+    usable_caption = clean_caption(row["caption"], cfg.author_name)
+    if not ok and not usable_caption:
+        db.set_state(video_id, "BLOCKED", f"contrôle qualité : {reason}")
+        log.warning("Bloquée [%d] %s : %s", video_id, row["name"], reason)
+        return False
+    if not ok:
+        transcript = ""  # transcription aberrante : on ne s'appuie que sur la légende
 
     caption = row["caption"] or ""
     is_short = row["category"] == "short"

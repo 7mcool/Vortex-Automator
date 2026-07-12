@@ -68,12 +68,20 @@ def probe(ffprobe: str, path: Path) -> dict | None:
 
 
 def load_tokkit_captions(tokkit_db: Path) -> dict[str, str]:
-    """Légendes TikTok d'origine, indexées par id TikTok."""
+    """Légendes TikTok d'origine, indexées par id TikTok.
+
+    La base est souvent VERROUILLÉE par l'application 4K Tokkit : on travaille
+    donc sur une copie temporaire, et on signale clairement un résultat vide.
+    """
     captions: dict[str, str] = {}
     if not tokkit_db.exists():
         return captions
+    tmp_copy = None
     try:
-        con = sqlite3.connect(f"file:{tokkit_db}?mode=ro", uri=True)
+        import tempfile
+        tmp_copy = Path(tempfile.gettempdir()) / "vortex_tokkit_copy.sqlite"
+        shutil.copy2(tokkit_db, tmp_copy)
+        con = sqlite3.connect(f"file:{tmp_copy}?mode=ro", uri=True)
         for tid, desc in con.execute(
             "SELECT id, description FROM MediaItems WHERE description IS NOT NULL AND description != ''"
         ):
@@ -81,6 +89,14 @@ def load_tokkit_captions(tokkit_db: Path) -> dict[str, str]:
         con.close()
     except Exception as exc:
         log.warning("Lecture de la base 4K Tokkit impossible : %s", exc)
+    finally:
+        if tmp_copy is not None:
+            tmp_copy.unlink(missing_ok=True)
+    if not captions:
+        log.warning("AUCUNE légende TikTok chargée — le SEO reposera sur la transcription seule "
+                    "(les légendes seront récupérées à un prochain scan).")
+    else:
+        log.info("%d légendes TikTok chargées.", len(captions))
     return captions
 
 
@@ -97,27 +113,40 @@ def scan(cfg: Config, db: Database) -> dict:
     captions = load_tokkit_captions(cfg.tokkit_db)
     cover_dir = cfg.source_dir / "cover"
 
-    stats = {"seen": 0, "new": 0, "known": 0, "blocked": 0, "too_short": 0}
+    stats = {"seen": 0, "new": 0, "known": 0, "blocked": 0, "too_short": 0, "in_progress": 0, "errors": 0}
     files = sorted(
         p for p in cfg.source_dir.iterdir()
         if p.is_file() and p.suffix.lower() in VIDEO_EXTENSIONS
     )
+    import time
     for path in files:
-        stats["seen"] += 1
-        name = path.stem
-        tiktok_id = name.split("_")[-1]
-        cover = cover_dir / f"{name}_cover.jpeg"
+        try:
+            stats["seen"] += 1
+            stat = path.stat()
+            # Fichier probablement en cours de téléchargement (4K Tokkit actif) :
+            # on l'ignore pour ce scan, il sera repris au suivant.
+            if time.time() - stat.st_mtime < 120:
+                stats["in_progress"] += 1
+                continue
 
-        meta = probe(ffprobe, path)
-        info = {
-            "name": name,
-            "path": str(path),
-            "tiktok_id": tiktok_id,
-            "sha256": sha256_file(path),
-            "size_bytes": path.stat().st_size,
-            "caption": captions.get(tiktok_id),
-            "cover_path": str(cover) if cover.exists() else None,
-        }
+            name = path.stem
+            tiktok_id = name.split("_")[-1]
+            cover = cover_dir / f"{name}_cover.jpeg"
+
+            meta = probe(ffprobe, path)
+            info = {
+                "name": name,
+                "path": str(path),
+                "tiktok_id": tiktok_id,
+                "sha256": sha256_file(path),
+                "size_bytes": stat.st_size,
+                "caption": captions.get(tiktok_id),
+                "cover_path": str(cover) if cover.exists() else None,
+            }
+        except OSError as exc:
+            log.warning("Fichier inaccessible pendant le scan : %s (%s)", path.name, exc)
+            stats["errors"] += 1
+            continue
         if meta is None:
             video_id, is_new = db.upsert_video(info)
             if is_new:

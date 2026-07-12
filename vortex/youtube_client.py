@@ -77,6 +77,9 @@ def upload_video(cfg: Config, service, *, path: str, title: str, description: st
         media_body=media,
         notifySubscribers=cfg.notify_subscribers,
     )
+    import socket
+    import ssl
+
     response = None
     retries = 0
     while response is None:
@@ -87,6 +90,15 @@ def upload_video(cfg: Config, service, *, path: str, title: str, description: st
                 retries += 1
                 wait = 2 ** retries
                 log.warning("Erreur %s, nouvel essai dans %ss", err.resp.status, wait)
+                time.sleep(wait)
+            else:
+                raise
+        except (ConnectionError, socket.timeout, ssl.SSLError, OSError) as err:
+            # Coupure réseau passagère : l'upload résumable reprend où il en était.
+            if retries < 5:
+                retries += 1
+                wait = 2 ** retries
+                log.warning("Erreur réseau (%s), reprise dans %ss", err, wait)
                 time.sleep(wait)
             else:
                 raise

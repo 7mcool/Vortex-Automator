@@ -37,7 +37,7 @@ def setup_logging(cfg) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="vortex", description="Vortex Automator — pipeline YouTube")
     parser.add_argument("command", choices=[
-        "scan", "transcribe", "prepare", "plan", "publish", "sync-channel", "status", "auth",
+        "scan", "transcribe", "prepare", "plan", "publish", "sync-channel", "status", "auth", "retry",
     ])
     parser.add_argument("-n", "--count", type=int, default=5,
                         help="nombre de vidéos à traiter (défaut : 5)")
@@ -76,6 +76,11 @@ def main(argv: list[str] | None = None) -> int:
                 print("`publish` sans --live = simulation. Ajoute --live pour envoyer réellement.")
             plan = plan_batch(cfg, db, args.count)
             execute_plan(cfg, db, plan, live=live)
+
+        elif args.command == "retry":
+            from .pipeline import retry_failed
+            n = retry_failed(db)
+            print(f"{n} vidéo(s) FAILED remise(s) en file (READY)")
 
         elif args.command == "sync-channel":
             from .pipeline import sync_channel

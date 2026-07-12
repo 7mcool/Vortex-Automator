@@ -16,6 +16,10 @@ language = "fr"
 made_for_kids = false
 notify_subscribers = true
 playlist_id = ""
+# Sous-titres via l'API : coûte 400 unités de quota/vidéo. Désactivé pour tenir
+# 5 uploads/jour dans le quota gratuit (10 000/j) — YouTube auto-génère les
+# sous-titres de toute façon ; les fichiers .srt restent dans data/subtitles.
+upload_captions = false
 
 [whisper]
 model = "small"        # small = bon compromis vitesse/qualité sur CPU

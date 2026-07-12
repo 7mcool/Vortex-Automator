@@ -47,6 +47,7 @@ class Config:
     made_for_kids: bool = False
     notify_subscribers: bool = True
     playlist_id: str = ""
+    upload_captions: bool = False  # 400 unités de quota/vidéo — désactivé pour tenir 5/jour
 
     # Transcription
     whisper_model: str = "small"
@@ -121,6 +122,7 @@ def load_config(config_file: Path | None = None) -> Config:
         made_for_kids=bool(publish.get("made_for_kids", False)),
         notify_subscribers=bool(publish.get("notify_subscribers", True)),
         playlist_id=publish.get("playlist_id", ""),
+        upload_captions=bool(publish.get("upload_captions", False)),
         whisper_model=whisper.get("model", "small"),
         whisper_device=whisper.get("device", "cpu"),
         whisper_compute=whisper.get("compute_type", "int8"),

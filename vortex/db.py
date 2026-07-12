@@ -69,8 +69,10 @@ def utcnow() -> str:
 class Database:
     def __init__(self, db_file: Path):
         db_file.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(db_file)
+        self.conn = sqlite3.connect(db_file, timeout=15)
         self.conn.row_factory = sqlite3.Row
+        self.conn.execute("PRAGMA busy_timeout = 15000")
+        self.conn.execute("PRAGMA journal_mode = WAL")
         self.conn.executescript(SCHEMA)
         self.conn.commit()
 
@@ -86,11 +88,34 @@ class Database:
         cur = self.conn.cursor()
         row = None
         if info.get("sha256"):
-            row = cur.execute("SELECT id FROM videos WHERE sha256 = ?", (info["sha256"],)).fetchone()
+            row = cur.execute("SELECT * FROM videos WHERE sha256 = ?", (info["sha256"],)).fetchone()
         if row is None:
-            row = cur.execute("SELECT id FROM videos WHERE name = ?", (info["name"],)).fetchone()
+            row = cur.execute("SELECT * FROM videos WHERE name = ?", (info["name"],)).fetchone()
         if row is not None:
-            return int(row["id"]), False
+            video_id = int(row["id"])
+            # Fichier modifié depuis (téléchargement terminé, remplacement…) :
+            # on rafraîchit les métadonnées et on redonne sa chance à la vidéo.
+            if info.get("sha256") and row["sha256"] and info["sha256"] != row["sha256"]:
+                self.update_fields(
+                    video_id, sha256=info["sha256"], path=info["path"],
+                    size_bytes=info.get("size_bytes"), duration_s=info.get("duration_s"),
+                    width=info.get("width"), height=info.get("height"),
+                    category=info.get("category"),
+                )
+                if row["state"] in ("BLOCKED", "FAILED", "SKIPPED"):
+                    self.set_state(video_id, "DISCOVERED", "fichier modifié, ré-examen")
+            else:
+                # Champs mutables : chemin (renommage), couverture, légende si absente.
+                updates = {}
+                if info["path"] != row["path"]:
+                    updates["path"] = info["path"]
+                if info.get("cover_path") and info["cover_path"] != row["cover_path"]:
+                    updates["cover_path"] = info["cover_path"]
+                if info.get("caption") and not row["caption"]:
+                    updates["caption"] = info["caption"]
+                if updates:
+                    self.update_fields(video_id, **updates)
+            return video_id, False
 
         now = utcnow()
         cur.execute(
@@ -145,7 +170,11 @@ class Database:
         return self.conn.execute("SELECT * FROM videos WHERE id = ?", (video_id,)).fetchone()
 
     def by_state(self, state: str, limit: int = 0) -> list[sqlite3.Row]:
-        sql = "SELECT * FROM videos WHERE state = ? ORDER BY duration_s ASC"
+        # Priorité aux vidéos substantielles (30 s à 3 min : vraies prédications),
+        # puis les plus longues d'abord ; les mini-clips passent en dernier.
+        sql = ("SELECT * FROM videos WHERE state = ? "
+               "ORDER BY CASE WHEN duration_s BETWEEN 30 AND 180 THEN 0 ELSE 1 END, "
+               "duration_s DESC")
         if limit:
             sql += f" LIMIT {int(limit)}"
         return self.conn.execute(sql, (state,)).fetchall()
@@ -162,6 +191,34 @@ class Database:
 
     def set_tags(self, video_id: int, tags: list[str]) -> None:
         self.update_fields(video_id, tags=json.dumps(tags, ensure_ascii=False))
+
+    def claim_for_upload(self, video_id: int, publish_at: str) -> bool:
+        """Réservation atomique READY -> UPLOADING (empêche deux publish concurrents)."""
+        cur = self.conn.execute(
+            "UPDATE videos SET state = 'UPLOADING', publish_at = ?, updated_at = ? "
+            "WHERE id = ? AND state = 'READY'",
+            (publish_at, utcnow(), video_id),
+        )
+        self.conn.commit()
+        if cur.rowcount == 1:
+            self.conn.execute(
+                "INSERT INTO events (video_id, from_state, to_state, detail, at) VALUES (?,?,?,?,?)",
+                (video_id, "READY", "UPLOADING", "réservation upload", utcnow()),
+            )
+            self.conn.commit()
+            return True
+        return False
+
+    def requalify_stale_uploads(self, max_age_hours: int = 6) -> int:
+        """Repasse en READY les UPLOADING orphelins (crash/coupure pendant l'upload)."""
+        from datetime import datetime, timedelta, timezone
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=max_age_hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        rows = self.conn.execute(
+            "SELECT id FROM videos WHERE state = 'UPLOADING' AND updated_at < ?", (cutoff,)
+        ).fetchall()
+        for r in rows:
+            self.set_state(r["id"], "READY", "upload orphelin requalifié")
+        return len(rows)
 
     # -------------------------------------------------------- chaîne existante
     def record_channel_video(self, youtube_id: str, title: str, published_at: str) -> None:
