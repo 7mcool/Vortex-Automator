@@ -16,5 +16,6 @@ services:
       - ./secrets:/app/secrets
       - ./data:/app/data
       - ./videos:/app/videos
+      - ./cache:/root/.cache
     mem_limit: 2g
     cpus: 1.5
