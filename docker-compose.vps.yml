@@ -12,6 +12,7 @@ services:
       - PYTHONIOENCODING=utf-8
     volumes:
       - ./config.toml:/app/config.toml:ro
+      - ./.env:/app/.env:ro
       - ./secrets:/app/secrets
       - ./data:/app/data
       - ./videos:/app/videos
