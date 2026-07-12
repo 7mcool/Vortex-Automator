@@ -19,3 +19,20 @@ services:
       - ./cache:/root/.cache
     mem_limit: 2g
     cpus: 1.5
+
+  dashboard:
+    image: vortex-automator:latest
+    command: python -m vortex.dashboard
+    restart: unless-stopped
+    environment:
+      - TZ=Africa/Porto-Novo
+      - PYTHONIOENCODING=utf-8
+    ports:
+      - "8787:8787"
+    volumes:
+      - ./config.toml:/app/config.toml:ro
+      - ./.env:/app/.env:ro
+      - ./secrets:/app/secrets:ro
+      - ./data:/app/data:ro
+    mem_limit: 256m
+    cpus: 0.3
