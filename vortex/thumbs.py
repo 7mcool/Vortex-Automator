@@ -22,11 +22,20 @@ from .textdetect import find_ffmpeg
 log = logging.getLogger("vortex.thumbs")
 
 W, H = 1280, 720
-PURPLE_DARK = (43, 8, 66)
-PURPLE_MID = (91, 20, 130)
-PURPLE_LIGHT = (150, 45, 190)
 GOLD = (255, 200, 30)
 WHITE = (255, 255, 255)
+
+# Palettes variées (demande de Michel : « varier les templates, les couleurs ») :
+# (sombre, moyen, clair) — familles violet / bleu nuit / bordeaux / vert / anthracite
+PALETTES = [
+    ((43, 8, 66), (91, 20, 130), (150, 45, 190)),      # violet (template original)
+    ((6, 18, 66), (16, 42, 130), (40, 90, 200)),        # bleu nuit
+    ((60, 8, 22), (120, 18, 40), (190, 40, 70)),        # bordeaux
+    ((6, 45, 30), (12, 90, 60), (30, 150, 100)),        # vert profond
+    ((18, 18, 24), (45, 45, 60), (90, 90, 120)),        # anthracite
+]
+
+ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
 
 
 def _font(size: int, bold: bool = True):
@@ -42,28 +51,45 @@ def _font(size: int, bold: bool = True):
     return ImageFont.load_default()
 
 
-def _gradient_bg():
-    """Fond violet en dégradé diagonal + halo lumineux central."""
+def _gradient_bg(video_id: int = 0):
+    """Fond en dégradé diagonal + halo lumineux — palette variée par vidéo."""
     from PIL import Image
     import math
+    dark, mid, light = PALETTES[video_id % len(PALETTES)]
     bg = Image.new("RGB", (W, H))
     px = bg.load()
     for y in range(H):
         for x in range(0, W, 2):  # pas de 2 pour la vitesse
             t = (x / W + y / H) / 2
-            r = int(PURPLE_DARK[0] + (PURPLE_MID[0] - PURPLE_DARK[0]) * t)
-            g = int(PURPLE_DARK[1] + (PURPLE_MID[1] - PURPLE_DARK[1]) * t)
-            b = int(PURPLE_DARK[2] + (PURPLE_MID[2] - PURPLE_DARK[2]) * t)
+            r = int(dark[0] + (mid[0] - dark[0]) * t)
+            g = int(dark[1] + (mid[1] - dark[1]) * t)
+            b = int(dark[2] + (mid[2] - dark[2]) * t)
             # halo autour du tiers droit (là où sera la photo)
             d = math.hypot((x - W * 0.72) / W, (y - H * 0.45) / H)
             glow = max(0, 1 - d * 2.2) * 0.55
-            r = min(255, int(r + (PURPLE_LIGHT[0] - r) * glow))
-            g = min(255, int(g + (PURPLE_LIGHT[1] - g) * glow))
-            b = min(255, int(b + (PURPLE_LIGHT[2] - b) * glow))
+            r = min(255, int(r + (light[0] - r) * glow))
+            g = min(255, int(g + (light[1] - g) * glow))
+            b = min(255, int(b + (light[2] - b) * glow))
             px[x, y] = (r, g, b)
             if x + 1 < W:
                 px[x + 1, y] = (r, g, b)
     return bg
+
+
+def _paste_logo(canvas):
+    """Logo rond de la chaîne en haut à droite (assets/logo-chaine.png)."""
+    from PIL import Image, ImageDraw, ImageOps
+    logo_path = ASSETS_DIR / "logo-chaine.png"
+    if not logo_path.exists():
+        return
+    logo = Image.open(logo_path).convert("RGBA").resize((110, 110))
+    mask = Image.new("L", logo.size, 0)
+    ImageDraw.Draw(mask).ellipse([0, 0, logo.size[0], logo.size[1]], fill=255)
+    ring = Image.new("RGBA", (logo.size[0] + 10, logo.size[1] + 10), (0, 0, 0, 0))
+    ImageDraw.Draw(ring).ellipse([0, 0, ring.size[0], ring.size[1]], fill=(255, 255, 255, 255))
+    canvas.alpha_composite(ring, (W - ring.size[0] - 28, 28))
+    logo.putalpha(mask)
+    canvas.alpha_composite(logo, (W - logo.size[0] - 33, 33))
 
 
 def _extract_frame(video_path: str, at: float, out_png: Path) -> bool:
@@ -144,7 +170,8 @@ def generate_thumb(cfg: Config, db: Database, video_id: int) -> bool:
     if not _extract_frame(str(src), (row["duration_s"] or 30) * 0.3, tmp_frame):
         return False
 
-    canvas = _gradient_bg().convert("RGBA")
+    canvas = _gradient_bg(video_id).convert("RGBA")
+    _paste_logo(canvas)
     subject = _cutout(tmp_frame)
     # photo aux 2/3 droits, calée en bas
     ratio = min(680 / subject.height, 620 / subject.width)

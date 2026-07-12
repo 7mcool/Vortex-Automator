@@ -55,7 +55,7 @@ CTA_POOL = [
     "❤ LIKE SI TU CROIS", "❤ DIS AMEN",
     "★ PARTAGE À UN AMI", "★ ENVOIE À QUELQU'UN", "★ PARTAGE CE MESSAGE",
     "✎ COMMENTE « AMEN »", "✎ TON AVIS EN COMMENTAIRE",
-    "► REJOINS LA FAMILLE", "❤ SAUVEGARDE CETTE VIDÉO",
+    "❤ SAUVEGARDE CETTE VIDÉO",
 ]
 CTA_FINALS = ["ABONNE-TOI ✚ PARTAGE", "ABONNE-TOI ❤ MERCI", "REJOINS-NOUS ► ABONNE-TOI"]
 
@@ -72,9 +72,10 @@ def _variant(video_id: int) -> dict:
         "ctas": rng.sample(CTA_POOL, 6),
         "cta_final": rng.choice(CTA_FINALS),
         "pulse_amp": rng.choice([108, 112, 116]),
-        # style des captions : karaoké (groupe + mot illuminé) ou word-pop
-        # (1-2 mots géants façon Hormozi) — 50/50
-        "caption_mode": rng.choice(["karaoke", "pop"]),
+        # style des captions : karaoké (groupe + mot illuminé), word-pop
+        # (1-2 mots géants façon Hormozi) ou build (la ligne se construit
+        # mot après mot, style machine à écrire CapCut)
+        "caption_mode": rng.choice(["karaoke", "pop", "build"]),
     }
 
 
@@ -132,6 +133,39 @@ def _pop_events(words_file: Path, duration: float, fs_pop: int = 0) -> list[str]
     return out
 
 
+def _build_events(words_file: Path, duration: float, max_chars: int, accent_hex: str) -> list[str]:
+    """Style « build » : la ligne se construit mot après mot (machine à écrire),
+    le dernier mot arrivé est en couleur d'accent."""
+    try:
+        words = json.loads(words_file.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    out = []
+    chunk: list[dict] = []
+    chunks: list[list[dict]] = []
+    for w in words:
+        if chunk and sum(len(x["w"]) + 1 for x in chunk) + len(w["w"]) > max_chars:
+            chunks.append(chunk)
+            chunk = []
+        chunk.append(w)
+        if len(chunk) >= 4 or (chunk[-1]["e"] - chunk[0]["s"]) >= 2.0:
+            chunks.append(chunk)
+            chunk = []
+    if chunk:
+        chunks.append(chunk)
+    accent = r"{\c&H" + accent_hex + "&}"
+    white = r"{\c&HFFFFFF&}"
+    for ch in chunks:
+        for i in range(len(ch)):
+            start = ch[i]["s"]
+            end = ch[i + 1]["s"] if i + 1 < len(ch) else max(ch[i]["e"], start + 0.3)
+            parts = [w["w"].upper() for w in ch[: i + 1]]
+            text = white + " ".join(parts[:-1])
+            text += (" " if len(parts) > 1 else "") + accent + parts[-1]
+            out.append(f"Dialogue: 2,{_ass_time(start)},{_ass_time(min(end, duration))},Karaoke,,0,0,0,,{text}")
+    return out
+
+
 def _karaoke_events(words_file: Path, duration: float, max_chars: int) -> list[str]:
     """Chunks courts, mot courant illuminé via \\k (style Submagic).
     max_chars est calculé depuis la largeur réelle de la vidéo."""
@@ -168,7 +202,7 @@ def _karaoke_events(words_file: Path, duration: float, max_chars: int) -> list[s
 
 def build_ass(cfg: Config, *, width: int, height: int, duration: float,
               title: str, words_file: Path | None, skip_hook: bool = False,
-              video_id: int = 0) -> str:
+              lifted: bool = False, video_id: int = 0) -> str:
     v = _variant(video_id)
     fontname = v["font"] if not Path(r"C:\Windows\Fonts\arial.ttf").exists() else "Arial"
     accent = r"\c&H" + v["accent"] + "&"
@@ -184,8 +218,10 @@ def build_ass(cfg: Config, *, width: int, height: int, duration: float,
     hook_chars = max(int(width * 0.86 / (fs_hook * 0.62)), 8)
     kara_chars = max(int(width * 0.86 / (fs_kara * 0.62)), 6)
     hook_top = int(height * 0.18)
-    kara_bottom = int(height * 0.34)   # captions proches du centre
-    badge_bottom = int(height * 0.18)
+    # Anti-superposition : si la vidéo a déjà ses textes incrustés (souvent au
+    # centre), nos captions descendent et le badge bas passe sous elles.
+    kara_bottom = int(height * (0.20 if lifted else 0.34))
+    badge_bottom = int(height * (0.08 if lifted else 0.18))
     badge_top = int(height * 0.26)     # variante haute des badges
     handle_top = int(height * 0.06)
 
@@ -259,6 +295,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
              r")\t(180,360,\fscx100\fscy100)}")
     for i, frac in enumerate((0.07, 0.21, 0.36, 0.51, 0.66, 0.80)):
         start = duration * frac
+        # anti-superposition : jamais de badge pendant l'accroche (6 premières s)
+        if not skip_hook and start < 6.0:
+            start = 6.0
         end = min(start + 3.2, duration - 5.5)
         if end <= start:
             continue
@@ -275,6 +314,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     if words_file and words_file.exists():
         if v["caption_mode"] == "pop":
             events += _pop_events(words_file, duration, fs_pop=int(height / 10))
+        elif v["caption_mode"] == "build":
+            events += _build_events(words_file, duration, kara_chars, v["kara"])
         else:
             events += _karaoke_events(words_file, duration, kara_chars)
 
@@ -309,7 +350,8 @@ def render_video(cfg: Config, db: Database, video_id: int) -> bool:
         build_ass(cfg, width=out_w, height=out_h,
                   duration=duration, title=row["title"] or "",
                   words_file=words_file if words_file.exists() else None,
-                  skip_hook=(has_text == "texte"), video_id=video_id),
+                  skip_hook=(has_text == "texte"),
+                  lifted=(has_text in ("texte", "douteux")), video_id=video_id),
         encoding="utf-8")
 
     def _ffpath(p: str) -> str:

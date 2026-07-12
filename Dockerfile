@@ -17,6 +17,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt yt-dlp pillow rembg onnxruntime
 
 COPY vortex/ vortex/
+COPY assets/ assets/
 COPY vps/daily.sh vps/fetch_tiktok.sh vps/
 RUN chmod +x vps/*.sh
 
