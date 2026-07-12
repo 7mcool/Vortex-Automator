@@ -44,7 +44,9 @@ def transcribe_video(cfg: Config, db: Database, video_id: int) -> bool:
         return False
     path = Path(row["path"])
     if not path.exists():
-        db.set_state(video_id, "FAILED", "fichier disparu avant transcription")
+        # Disque externe débranché ou fichier déplacé : on n'échoue pas la vidéo,
+        # elle sera reprise quand le fichier réapparaîtra (prochain scan/run).
+        log.warning("Fichier inaccessible (disque débranché ?) : %s — vidéo laissée en attente", path)
         return False
 
     model = get_model(cfg)

@@ -143,6 +143,11 @@ def execute_plan(cfg: Config, db: Database, plan: list[dict], live: bool) -> Non
         plan = survivors
 
     for p in plan:
+        row_check = db.get(p["video_id"])
+        if not Path(row_check["path"]).exists():
+            log.warning("Fichier inaccessible (disque débranché ?) : %s — vidéo laissée en READY",
+                        row_check["path"])
+            continue
         # Créneau recalculé maintenant : jamais de publishAt déjà passé.
         slots = next_free_slots(cfg, db, 1)
         if not slots:
@@ -196,10 +201,16 @@ def execute_plan(cfg: Config, db: Database, plan: list[dict], live: bool) -> Non
 
 
 def retry_failed(db: Database) -> int:
-    """FAILED -> READY (nouvelle tentative au prochain publish)."""
+    """Remet les FAILED dans le circuit, à l'étape où ils avaient échoué."""
     rows = db.by_state("FAILED")
     for r in rows:
-        db.set_state(r["id"], "READY", "nouvelle tentative demandée")
+        if r["title"]:
+            target = "READY"
+        elif r["transcript_path"]:
+            target = "TRANSCRIBED"
+        else:
+            target = "DISCOVERED"
+        db.set_state(r["id"], target, "nouvelle tentative demandée")
     return len(rows)
 
 

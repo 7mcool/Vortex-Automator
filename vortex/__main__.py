@@ -37,7 +37,8 @@ def setup_logging(cfg) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="vortex", description="Vortex Automator — pipeline YouTube")
     parser.add_argument("command", choices=[
-        "scan", "transcribe", "prepare", "plan", "publish", "sync-channel", "status", "auth", "retry",
+        "scan", "transcribe", "prepare", "plan", "publish", "sync-channel", "status", "auth",
+        "retry", "engage", "detect-text",
     ])
     parser.add_argument("-n", "--count", type=int, default=5,
                         help="nombre de vidéos à traiter (défaut : 5)")
@@ -76,6 +77,16 @@ def main(argv: list[str] | None = None) -> int:
                 print("`publish` sans --live = simulation. Ajoute --live pour envoyer réellement.")
             plan = plan_batch(cfg, db, args.count)
             execute_plan(cfg, db, plan, live=live)
+
+        elif args.command == "engage":
+            from .engage import run_engagement
+            stats = run_engagement(cfg, db, max_actions=args.count if args.count != 5 else 20)
+            print(f"Engagement : {stats}")
+
+        elif args.command == "detect-text":
+            from .textdetect import detect_pending
+            stats = detect_pending(cfg, db, limit=args.count)
+            print(f"Détection de texte : {stats}")
 
         elif args.command == "retry":
             from .pipeline import retry_failed

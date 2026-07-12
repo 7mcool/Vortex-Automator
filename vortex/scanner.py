@@ -109,6 +109,11 @@ def classify(duration_s: float, width: int, height: int, shorts_max: int) -> str
 
 def scan(cfg: Config, db: Database) -> dict:
     """Scanne le dossier source ; retourne un résumé chiffré."""
+    if not cfg.source_dir.exists():
+        log.error("Dossier source inaccessible : %s — disque externe débranché ? Scan annulé.",
+                  cfg.source_dir)
+        return {"seen": 0, "new": 0, "known": 0, "blocked": 0, "too_short": 0,
+                "in_progress": 0, "errors": 1}
     ffprobe = find_ffprobe()
     captions = load_tokkit_captions(cfg.tokkit_db)
     cover_dir = cfg.source_dir / "cover"
