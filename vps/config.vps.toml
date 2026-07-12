@@ -1,0 +1,35 @@
+# Configuration Vortex Automator — VPS (chemins conteneur Docker)
+
+[paths]
+source_dir = '/app/videos/hedjav'
+tokkit_db = '/app/videos/tokkit-inutilise.sqlite'   # pas de 4K Tokkit sur le VPS (légendes via .info.json)
+data_dir = '/app/data'
+client_secret_file = '/app/secrets/client_secret.json'
+token_file = '/app/secrets/youtube_token.json'
+
+[publish]
+hours = [9, 12, 15, 18, 21]
+daily_limit = 5
+timezone = "Africa/Porto-Novo"
+category_id = "27"
+language = "fr"
+made_for_kids = false
+notify_subscribers = true
+playlist_id = ""
+upload_captions = false
+
+[whisper]
+model = "small"
+device = "cpu"
+compute_type = "int8"
+
+[seo]
+channel_name = "Sophos PropheTikos"
+known_speakers = ["Jacques Amessan", "Mohammed Sanogo"]
+hashtags = ["#foi", "#motivation", "#predication"]
+max_title_len = 95
+tags_count = 15
+
+[video]
+shorts_max_seconds = 180
+min_duration_seconds = 5

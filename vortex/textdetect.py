@@ -56,12 +56,24 @@ def find_tesseract() -> str | None:
     ])
 
 
+def _tessdata_dir() -> str | None:
+    """Dossier tessdata utilisateur si le pack français y a été installé
+    (l'écriture dans Program Files est refusée sans droits admin)."""
+    import os
+    user_dir = Path(os.environ.get("LOCALAPPDATA", "")) / "vortex-tessdata"
+    if (user_dir / "fra.traineddata").exists():
+        return str(user_dir)
+    return None
+
+
 def ocr_image(tesseract: str, image: Path) -> str:
+    cmd = [tesseract, str(image), "stdout", "-l", "fra+eng", "--psm", "6"]
+    tessdata = _tessdata_dir()
+    if tessdata:
+        cmd += ["--tessdata-dir", tessdata]
     try:
-        out = subprocess.run(
-            [tesseract, str(image), "stdout", "-l", "fra+eng", "--psm", "6"],
-            capture_output=True, text=True, timeout=60, encoding="utf-8", errors="ignore",
-        )
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=60,
+                             encoding="utf-8", errors="ignore")
         return out.stdout or ""
     except Exception as exc:
         log.debug("OCR échoué sur %s : %s", image, exc)

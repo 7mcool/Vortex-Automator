@@ -159,10 +159,14 @@ def execute_plan(cfg: Config, db: Database, plan: list[dict], live: bool) -> Non
             log.warning("Vidéo #%d déjà réservée par un autre processus — ignorée.", p["video_id"])
             continue
         row = db.get(p["video_id"])
+        # Version habillée (Phase 2) si elle existe, sinon l'original
+        upload_path = row["path"]
+        if "render_path" in row.keys() and row["render_path"] and Path(row["render_path"]).exists():
+            upload_path = row["render_path"]
         try:
             youtube_id = youtube_client.upload_video(
                 cfg, service,
-                path=row["path"],
+                path=upload_path,
                 title=row["title"],
                 description=row["description"],
                 tags=json.loads(row["tags"] or "[]"),

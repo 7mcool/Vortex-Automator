@@ -138,6 +138,16 @@ def scan(cfg: Config, db: Database) -> dict:
             tiktok_id = name.split("_")[-1]
             cover = cover_dir / f"{name}_cover.jpeg"
 
+            # Légende : base 4K Tokkit (PC) OU fichier .info.json de yt-dlp (VPS)
+            caption = captions.get(tiktok_id)
+            if not caption:
+                info_json = path.parent / f"{name}.info.json"
+                if info_json.exists():
+                    try:
+                        caption = json.loads(info_json.read_text(encoding="utf-8")).get("description")
+                    except Exception:
+                        pass
+
             meta = probe(ffprobe, path)
             info = {
                 "name": name,
@@ -145,7 +155,7 @@ def scan(cfg: Config, db: Database) -> dict:
                 "tiktok_id": tiktok_id,
                 "sha256": sha256_file(path),
                 "size_bytes": stat.st_size,
-                "caption": captions.get(tiktok_id),
+                "caption": caption,
                 "cover_path": str(cover) if cover.exists() else None,
             }
         except OSError as exc:

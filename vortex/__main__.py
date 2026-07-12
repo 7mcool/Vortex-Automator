@@ -38,7 +38,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="vortex", description="Vortex Automator — pipeline YouTube")
     parser.add_argument("command", choices=[
         "scan", "transcribe", "prepare", "plan", "publish", "sync-channel", "status", "auth",
-        "retry", "engage", "detect-text",
+        "retry", "engage", "detect-text", "render",
     ])
     parser.add_argument("-n", "--count", type=int, default=5,
                         help="nombre de vidéos à traiter (défaut : 5)")
@@ -87,6 +87,11 @@ def main(argv: list[str] | None = None) -> int:
             from .textdetect import detect_pending
             stats = detect_pending(cfg, db, limit=args.count)
             print(f"Détection de texte : {stats}")
+
+        elif args.command == "render":
+            from .render import render_pending
+            n = render_pending(cfg, db, limit=args.count)
+            print(f"{n} vidéo(s) habillée(s) (hook + CTA + filigrane)")
 
         elif args.command == "retry":
             from .pipeline import retry_failed

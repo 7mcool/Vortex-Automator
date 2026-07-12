@@ -1,0 +1,19 @@
+# Vortex Automator — déploiement VPS (Phase 3)
+# Usage :
+#   docker compose -f docker-compose.vps.yml build
+#   docker compose -f docker-compose.vps.yml run --rm vortex vps/daily.sh   # routine complète
+#   docker compose -f docker-compose.vps.yml run --rm vortex python -m vortex status
+services:
+  vortex:
+    build: .
+    image: vortex-automator:latest
+    environment:
+      - TZ=Africa/Porto-Novo
+      - PYTHONIOENCODING=utf-8
+    volumes:
+      - ./config.toml:/app/config.toml:ro
+      - ./secrets:/app/secrets
+      - ./data:/app/data
+      - ./videos:/app/videos
+    mem_limit: 2g
+    cpus: 1.5
