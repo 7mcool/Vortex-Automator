@@ -1,18 +1,21 @@
-"""Phase 2 — Habillage visuel FFmpeg, OBLIGATOIRE pour TOUTES les vidéos.
+"""Habillage vidéo v3 — format « prédication » (template de Michel) + karaoké Submagic.
 
-Règle de Michel (12/07 soir) : les textes déjà présents dans les vidéos ne sont
-que des sous-titres simples — aucun appel à l'action stratégique. L'habillage
-s'applique donc à toutes les vidéos, SANS jamais retirer l'existant :
-- accroche texte des 2,5 premières secondes (haut de l'image — zone libre) ;
-- rappel « Abonne-toi ✚ » pendant les 3 dernières secondes (remonté si la
-  vidéo a déjà des sous-titres en bas, pour éviter le chevauchement) ;
-- filigrane du nom de la chaîne en haut (semi-transparent).
+Mise en page (canvas 1080×1920) :
+- bande noire HAUT : la citation-accroche en MAJUSCULES, 3 premiers mots en OR,
+  suite en blanc, visible en permanence ;
+- vidéo au centre (jamais recadrée, réduite pour tenir) ;
+- captions KARAOKÉ mot-à-mot dans le bas de la vidéo (MAJUSCULES, mot courant
+  en VERT, style Submagic/OpusClip) quand le timing des mots existe ;
+- bande noire BAS : @handle souligné + badges CTA en rotation pendant TOUTE la
+  vidéo : ► S'ABONNER / ❤ LIKE SI TU CROIS / ★ PARTAGE À UN AMI / ✎ COMMENTE « AMEN »
+  (demande de Michel : « un truc qui fait exploser le compte »).
+
 L'original n'est JAMAIS modifié : copie habillée dans data/exports/.
-La détection OCR (has_text) sert à choisir la position du CTA.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import subprocess
 from pathlib import Path
@@ -23,38 +26,15 @@ from .textdetect import find_ffmpeg
 
 log = logging.getLogger("vortex.render")
 
+CANVAS_W, CANVAS_H = 1080, 1920
+BAND_TOP, BAND_BOTTOM = 320, 240
+VIDEO_H = CANVAS_H - BAND_TOP - BAND_BOTTOM  # 1360
 
-def find_font() -> str:
-    for candidate in (
-        r"C:\Windows\Fonts\arialbd.ttf",
-        r"C:\Windows\Fonts\arial.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-    ):
-        if Path(candidate).exists():
-            return candidate
-    raise FileNotFoundError("Aucune police trouvée pour drawtext")
+GOLD = r"\c&H00D7FF&"
+WHITE = r"\c&HFFFFFF&"
 
-
-def _esc(text: str) -> str:
-    """Échappe un texte pour le filtre drawtext de FFmpeg."""
-    return (text.replace("\\", "\\\\").replace(":", r"\:").replace("'", r"\'")
-            .replace("%", r"\%").replace(",", r"\,"))
-
-
-def _wrap(text: str, width: int = 26, max_lines: int = 3) -> str:
-    words, lines, cur = text.split(), [], ""
-    for w in words:
-        if len(cur) + len(w) + 1 > width and cur:
-            lines.append(cur)
-            cur = w
-            if len(lines) == max_lines:
-                break
-        else:
-            cur = f"{cur} {w}".strip()
-    if cur and len(lines) < max_lines:
-        lines.append(cur)
-    return "\n".join(lines)
+CTA_ROTATION = ["► S'ABONNER", "❤ LIKE SI TU CROIS", "★ PARTAGE À UN AMI", "✎ COMMENTE « AMEN »"]
+CTA_FINAL = "► ABONNE-TOI ✚ PARTAGE ❤"
 
 
 def _ass_time(seconds: float) -> str:
@@ -65,70 +45,124 @@ def _ass_time(seconds: float) -> str:
     return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
 
-def build_ass(cfg: Config, *, width: int, height: int, duration: float,
-              title: str, lifted: bool) -> str:
-    """Habillage professionnel via sous-titres ASS (libass) :
-    - accroche avec contour noir épais + premiers mots en OR (lisible sur tout fond),
-      fondu d'apparition/disparition ;
-    - badge rouge « S'ABONNER » façon bouton YouTube (milieu + fin de vidéo) ;
-    - filigrane discret permanent.
-    `lifted` remonte les badges quand la vidéo a déjà des sous-titres en bas."""
-    fontname = "Arial" if Path(r"C:\Windows\Fonts\arial.ttf").exists() else "DejaVu Sans"
-
-    hook = title.replace(" #Shorts", "").strip()
-    words = hook.split()
-    if len(words) > 9:  # accroche courte = accroche lue (le titre complet reste dans les métadonnées)
-        words = words[:9]
-        words[-1] = words[-1].rstrip(",;:-") + "…"
-    gold_part = " ".join(words[:3])
-    rest_part = " ".join(words[3:])
-    # \N tous les ~16 caractères pour rester dans le cadre
-    def wrap_ass(text: str, w: int = 16) -> str:
-        lines, cur = [], ""
-        for word in text.split():
-            if len(cur) + len(word) + 1 > w and cur:
-                lines.append(cur)
-                cur = word
-            else:
-                cur = f"{cur} {word}".strip()
-        if cur:
+def _wrap(text: str, width: int, max_lines: int) -> list[str]:
+    lines, cur = [], ""
+    for word in text.split():
+        if len(cur) + len(word) + 1 > width and cur:
             lines.append(cur)
-        return r"\N".join(lines[:4])
+            cur = word
+            if len(lines) == max_lines:
+                break
+        else:
+            cur = f"{cur} {word}".strip()
+    if cur and len(lines) < max_lines:
+        lines.append(cur)
+    return lines
 
-    gold = r"{\c&H00D7FF&}"     # or (BGR)
-    white = r"{\c&HFFFFFF&}"
-    hook_txt = gold + wrap_ass(gold_part) + (r"\N" + white + wrap_ass(rest_part) if rest_part else "")
 
-    fs_hook = int(height / 19)
-    fs_badge = int(height / 26)
-    fs_brand = int(height / 42)
-    margin_badge = int(height * (0.30 if lifted else 0.12))
+def _fontname() -> str:
+    return "Arial" if Path(r"C:\Windows\Fonts\arial.ttf").exists() else "DejaVu Sans"
 
-    cta_start = max(duration - 3.5, duration * 0.66)
-    mid_start = duration * 0.45
-    mid_end = min(mid_start + 2.8, cta_start - 0.8)
+
+def _karaoke_events(words_file: Path, duration: float) -> list[str]:
+    """Chunks de 3 mots max, mot courant vert via \\k (style Submagic)."""
+    try:
+        words = json.loads(words_file.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    events = []
+    chunk: list[dict] = []
+    for w in words:
+        chunk.append(w)
+        span = chunk[-1]["e"] - chunk[0]["s"]
+        if len(chunk) >= 3 or span >= 1.6:
+            events.append(chunk)
+            chunk = []
+    if chunk:
+        events.append(chunk)
+
+    out = []
+    for ch in events:
+        start, end = ch[0]["s"], max(ch[-1]["e"], ch[0]["s"] + 0.3)
+        parts = []
+        for w in ch:
+            k_cs = max(int((w["e"] - w["s"]) * 100), 8)
+            parts.append(f"{{\\k{k_cs}}}{w['w'].upper()}")
+        text = r"{\fad(60,60)}" + " ".join(parts)
+        out.append(f"Dialogue: 2,{_ass_time(start)},{_ass_time(min(end, duration))},Karaoke,,0,0,0,,{text}")
+    return out
+
+
+def build_ass(cfg: Config, *, duration: float, title: str, words_file: Path | None) -> str:
+    fontname = _fontname()
+
+    hook = title.replace(" #Shorts", "").strip().upper()
+    words = hook.split()
+    if len(words) > 12:
+        words = words[:12]
+        words[-1] = words[-1].rstrip(",;:-") + "…"
+    gold_txt = " ".join(words[:3])
+    rest_txt = " ".join(words[3:])
+    hook_lines = []
+    for i, line in enumerate(_wrap(f"{gold_txt}\x00{rest_txt}".replace("\x00", " "), 24, 4)):
+        hook_lines.append(line)
+    # Couleur : on passe au blanc dès que les mots dorés sont épuisés
+    gold_chars = len(gold_txt)
+    flat = " ".join(hook_lines)
+    hook_txt = ""
+    count = 0
+    hook_txt += "{" + GOLD + "}"
+    switched = False
+    for line in hook_lines:
+        for ch in line:
+            if not switched and count >= gold_chars:
+                hook_txt += "{" + WHITE + "}"
+                switched = True
+            hook_txt += ch
+            count += 1
+        hook_txt += r"\N"
+        count += 1
+    hook_txt = hook_txt.rstrip(r"\N")
+
+    handle = "@sophos_prophetikos"
 
     header = f"""[Script Info]
 ScriptType: v4.00+
-PlayResX: {width}
-PlayResY: {height}
+PlayResX: {CANVAS_W}
+PlayResY: {CANVAS_H}
 WrapStyle: 2
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Hook,{fontname},{fs_hook},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0.5,0,1,4,2,8,30,30,{int(height * 0.10)},1
-Style: Badge,{fontname},{fs_badge},&H00FFFFFF,&H00FFFFFF,&H002313E6,&H002313E6,-1,0,0,0,100,100,1,0,3,10,0,2,30,30,{margin_badge},1
-Style: Brand,{fontname},{fs_brand},&H64FFFFFF,&H64FFFFFF,&H64000000,&H00000000,-1,0,0,0,100,100,1,0,1,2,0,8,30,30,{int(height * 0.015)},1
+Style: Hook,{fontname},58,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,-1,0,0,100,100,0.5,0,1,3,0,8,40,40,36,1
+Style: Karaoke,{fontname},76,&H0005FF2C,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,1,0,1,5,2,2,40,40,{BAND_BOTTOM + 40},1
+Style: Badge,{fontname},52,&H00FFFFFF,&H00FFFFFF,&H001323E6,&H001323E6,-1,0,0,0,100,100,1,0,3,12,0,2,40,40,120,1
+Style: Handle,{fontname},40,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,-1,-1,0,100,100,1,0,1,2,0,2,40,40,34,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     events = [
-        f"Dialogue: 1,{_ass_time(0.3)},{_ass_time(4.5)},Hook,,0,0,0,,{{\\fad(250,300)}}{hook_txt}",
-        f"Dialogue: 1,{_ass_time(mid_start)},{_ass_time(mid_end)},Badge,,0,0,0,,{{\\fad(200,200)}}► S'ABONNER",
-        f"Dialogue: 1,{_ass_time(cta_start)},{_ass_time(duration)},Badge,,0,0,0,,{{\\fad(250,0)}}❤ ABONNE-TOI ✚ PARTAGE",
-        f"Dialogue: 0,{_ass_time(0)},{_ass_time(duration)},Brand,,0,0,0,,{cfg.channel_name}",
+        f"Dialogue: 1,{_ass_time(0)},{_ass_time(duration)},Hook,,0,0,0,,{hook_txt}",
+        f"Dialogue: 1,{_ass_time(0)},{_ass_time(duration)},Handle,,0,0,0,,{handle}",
     ]
+    # CTA en rotation sur toute la durée (fenêtres de 3 s à 15/35/55/75 %)
+    for i, frac in enumerate((0.15, 0.35, 0.55, 0.75)):
+        start = duration * frac
+        end = min(start + 3.0, duration - 4.5)
+        if end <= start:
+            continue
+        txt = CTA_ROTATION[i % len(CTA_ROTATION)]
+        events.append(
+            f"Dialogue: 1,{_ass_time(start)},{_ass_time(end)},Badge,,0,0,0,,{{\\fad(200,200)}}{txt}")
+    # CTA final appuyé
+    events.append(
+        f"Dialogue: 1,{_ass_time(max(duration - 4.0, 0))},{_ass_time(duration)},Badge,,0,0,0,,"
+        f"{{\\fad(250,0)}}{CTA_FINAL}")
+
+    if words_file and words_file.exists():
+        events += _karaoke_events(words_file, duration)
+
     return header + "\n".join(events) + "\n"
 
 
@@ -136,7 +170,6 @@ def render_video(cfg: Config, db: Database, video_id: int) -> bool:
     row = db.get(video_id)
     if row is None:
         return False
-    has_text = row["has_text"] if "has_text" in row.keys() else None
     src = Path(row["path"])
     if not src.exists():
         log.warning("Fichier inaccessible : %s", src)
@@ -145,23 +178,25 @@ def render_video(cfg: Config, db: Database, video_id: int) -> bool:
     exports = cfg.data_dir / "exports"
     exports.mkdir(parents=True, exist_ok=True)
     out = exports / f"{row['name']}_v.mp4"
-
     duration = row["duration_s"] or 30
-    width = row["width"] or 576
-    height = row["height"] or 1024
+    words_file = cfg.data_dir / "words" / f"{row['name']}.json"
 
     ass_file = exports / f"{row['name']}.ass"
     ass_file.write_text(
-        build_ass(cfg, width=width, height=height, duration=duration,
-                  title=row["title"] or "", lifted=has_text in ("texte", "douteux")),
+        build_ass(cfg, duration=duration, title=row["title"] or "",
+                  words_file=words_file if words_file.exists() else None),
         encoding="utf-8")
 
     def _ffpath(p: str) -> str:
         return p.replace("\\", "/").replace(":", r"\:")
 
-    cmd = [find_ffmpeg(), "-v", "error", "-i", str(src),
-           "-vf", f"ass='{_ffpath(str(ass_file))}'",
-           "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+    vf = (
+        f"scale={CANVAS_W}:{VIDEO_H}:force_original_aspect_ratio=decrease,"
+        f"pad={CANVAS_W}:{CANVAS_H}:(ow-iw)/2:{BAND_TOP}+({VIDEO_H}-ih)/2:color=black,"
+        f"ass='{_ffpath(str(ass_file))}'"
+    )
+    cmd = [find_ffmpeg(), "-v", "error", "-i", str(src), "-vf", vf,
+           "-c:v", "libx264", "-preset", "veryfast", "-crf", "21",
            "-c:a", "copy", "-movflags", "+faststart", "-y", str(out)]
     try:
         subprocess.run(cmd, capture_output=True, timeout=1800, check=True)
@@ -181,17 +216,15 @@ def render_video(cfg: Config, db: Database, video_id: int) -> bool:
 
 
 def render_pending(cfg: Config, db: Database, limit: int = 0) -> int:
-    """Habille les vidéos READY qui n'ont pas encore de rendu (TOUTES les vidéos,
-    dans le même ordre que la publication pour que les prochaines publiées
-    soient habillées en premier)."""
+    """Habille les vidéos READY sans rendu, dans l'ordre de publication."""
     cols = [r[1] for r in db.conn.execute("PRAGMA table_info(videos)")]
     if "render_path" not in cols:
         db.conn.execute("ALTER TABLE videos ADD COLUMN render_path TEXT")
         db.conn.commit()
-    sql = ("SELECT id FROM videos WHERE state = 'READY' AND render_path IS NULL "
-           "ORDER BY CASE WHEN duration_s BETWEEN 30 AND 180 THEN 0 ELSE 1 END, "
-           "duration_s DESC")
-    rows = db.conn.execute(sql).fetchall()
+    rows = db.conn.execute(
+        "SELECT id FROM videos WHERE state = 'READY' AND render_path IS NULL "
+        "ORDER BY CASE WHEN duration_s BETWEEN 30 AND 180 THEN 0 ELSE 1 END, "
+        "duration_s DESC").fetchall()
     done = 0
     for r in rows:
         if limit and done >= limit:
