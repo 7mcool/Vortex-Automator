@@ -30,8 +30,9 @@ log = logging.getLogger("vortex.render")
 GOLD = r"\c&H00D7FF&"
 WHITE = r"\c&HFFFFFF&"
 
-CTA_ROTATION = ["► S'ABONNER", "❤ LIKE SI TU CROIS", "★ PARTAGE À UN AMI", "✎ COMMENTE « AMEN »"]
-CTA_FINAL = "► ABONNE-TOI ✚ PARTAGE ❤"
+CTA_ROTATION = ["► S'ABONNER", "❤ LIKE SI TU CROIS", "★ PARTAGE À UN AMI",
+                "✎ COMMENTE « AMEN »", "► ABONNE-TOI", "❤ DIS AMEN"]
+CTA_FINAL = "ABONNE-TOI ✚ PARTAGE"
 
 
 def _ass_time(seconds: float) -> str:
@@ -96,22 +97,28 @@ def _karaoke_events(words_file: Path, duration: float, max_chars: int) -> list[s
 
 
 def build_ass(cfg: Config, *, width: int, height: int, duration: float,
-              title: str, words_file: Path | None) -> str:
+              title: str, words_file: Path | None, skip_hook: bool = False) -> str:
     fontname = _fontname()
 
-    # Tailles et marges relatives à la vidéo (plein écran, textes loin des bords)
+    # Tailles et marges relatives à la vidéo — textes RAPPROCHÉS DU CENTRE
+    # (retour de Michel : plus visibles, jamais collés aux bords)
     fs_hook = int(height / 18)
     fs_kara = int(height / 15)
     fs_badge = int(height / 20)
-    fs_handle = int(height / 34)
+    fs_handle = int(height / 30)
     margin_lr = int(width * 0.07)
     # Largeur maximale des lignes CALCULÉE (bold uppercase ≈ 0,62 × fontsize par caractère)
     hook_chars = max(int(width * 0.86 / (fs_hook * 0.62)), 8)
     kara_chars = max(int(width * 0.86 / (fs_kara * 0.62)), 6)
-    hook_top = int(height * 0.12)
-    kara_bottom = int(height * 0.30)   # captions au centre-bas (~2/3 de la hauteur)
-    badge_bottom = int(height * 0.12)
-    handle_top = int(height * 0.03)
+    hook_top = int(height * 0.18)
+    kara_bottom = int(height * 0.34)   # captions proches du centre
+    badge_bottom = int(height * 0.18)
+    badge_top = int(height * 0.26)     # variante haute des badges
+    handle_top = int(height * 0.06)
+
+    def badge_fs(text: str) -> int:
+        """Taille auto-ajustée pour qu'un badge ne déborde JAMAIS."""
+        return min(fs_badge, int(width * 0.80 / (max(len(text), 1) * 0.62)))
 
     hook = title.replace(" #Shorts", "").strip().upper()
     words = hook.split()
@@ -155,33 +162,40 @@ WrapStyle: 2
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Hook,{fontname},{fs_hook},&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,-1,-1,0,0,100,100,0.5,0,1,4,2,8,{margin_lr},{margin_lr},{hook_top},1
 Style: Karaoke,{fontname},{fs_kara},&H0005FF2C,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,1,0,1,5,3,2,{margin_lr},{margin_lr},{kara_bottom},1
-Style: Badge,{fontname},{fs_badge},&H00FFFFFF,&H00FFFFFF,&H001323E6,&H001323E6,-1,0,0,0,100,100,1,0,3,{max(int(height/160), 8)},0,2,{margin_lr},{margin_lr},{badge_bottom},1
-Style: Handle,{fontname},{fs_handle},&H50FFFFFF,&H50FFFFFF,&H50000000,&H00000000,-1,-1,0,0,100,100,1,0,1,2,0,8,{margin_lr},{margin_lr},{handle_top},1
+Style: BadgeBas,{fontname},{fs_badge},&H00FFFFFF,&H00FFFFFF,&H001323E6,&H001323E6,-1,0,0,0,100,100,1,0,3,{max(int(height/160), 8)},0,2,{margin_lr},{margin_lr},{badge_bottom},1
+Style: BadgeHaut,{fontname},{fs_badge},&H00FFFFFF,&H00FFFFFF,&H001323E6,&H001323E6,-1,0,0,0,100,100,1,0,3,{max(int(height/160), 8)},0,8,{margin_lr},{margin_lr},{badge_top},1
+Style: Handle,{fontname},{fs_handle},&H38FFFFFF,&H38FFFFFF,&H38000000,&H00000000,-1,-1,0,0,100,100,1,0,1,2,0,8,{margin_lr},{margin_lr},{handle_top},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     zoom_in = r"{\fad(250,300)\t(0,250,\fscx104\fscy104)\t(250,500,\fscx100\fscy100)}"
     events = [
-        # Accroche : 5 premières secondes seulement (elle recouvre la vidéo)
-        f"Dialogue: 1,{_ass_time(0.2)},{_ass_time(5.2)},Hook,,0,0,0,,{zoom_in}{hook_txt}",
         f"Dialogue: 0,{_ass_time(0)},{_ass_time(duration)},Handle,,0,0,0,,{handle}",
     ]
-    # CTA agressifs : 5 fenêtres de 3,5 s réparties sur toute la durée,
-    # avec pulsation d'attention (Michel : « inciter les gens à passer à l'action »)
+    if not skip_hook:
+        # Accroche : 5 premières secondes seulement (elle recouvre la vidéo).
+        # Supprimée quand la vidéo affiche déjà son message à l'écran
+        # (retour de Michel : jamais deux fois le même message).
+        events.append(
+            f"Dialogue: 1,{_ass_time(0.2)},{_ass_time(5.2)},Hook,,0,0,0,,{zoom_in}{hook_txt}")
+    # CTA agressifs ÉPARPILLÉS : 6 fenêtres à des moments ET des positions
+    # variés (bas / haut en alternance), taille auto-ajustée, pulsation.
     pulse = r"{\fad(150,150)\t(0,180,\fscx112\fscy112)\t(180,360,\fscx100\fscy100)}"
-    for i, frac in enumerate((0.08, 0.27, 0.46, 0.65, 0.82)):
+    for i, frac in enumerate((0.07, 0.21, 0.36, 0.51, 0.66, 0.80)):
         start = duration * frac
-        end = min(start + 3.5, duration - 5.5)
+        end = min(start + 3.2, duration - 5.5)
         if end <= start:
             continue
         txt = CTA_ROTATION[i % len(CTA_ROTATION)]
+        style = "BadgeBas" if i % 2 == 0 else "BadgeHaut"
         events.append(
-            f"Dialogue: 1,{_ass_time(start)},{_ass_time(end)},Badge,,0,0,0,,{pulse}{txt}")
-    # CTA final appuyé (5 dernières secondes)
+            f"Dialogue: 1,{_ass_time(start)},{_ass_time(end)},{style},,0,0,0,,"
+            f"{{\\fs{badge_fs(txt)}}}{pulse}{txt}")
+    # CTA final appuyé (5 dernières secondes, en bas)
     events.append(
-        f"Dialogue: 1,{_ass_time(max(duration - 5.0, 0))},{_ass_time(duration)},Badge,,0,0,0,,"
-        f"{pulse}{CTA_FINAL}")
+        f"Dialogue: 1,{_ass_time(max(duration - 5.0, 0))},{_ass_time(duration)},BadgeBas,,0,0,0,,"
+        f"{{\\fs{badge_fs(CTA_FINAL)}}}{pulse}{CTA_FINAL}")
 
     if words_file and words_file.exists():
         events += _karaoke_events(words_file, duration, kara_chars)
@@ -204,20 +218,34 @@ def render_video(cfg: Config, db: Database, video_id: int) -> bool:
     duration = row["duration_s"] or 30
     words_file = cfg.data_dir / "words" / f"{row['name']}.json"
 
+    has_text = row["has_text"] if "has_text" in row.keys() else None
+    src_w, src_h = row["width"] or 576, row["height"] or 1024
+    # Amélioration de qualité (retour de Michel : « les vidéos sont pas claires ») :
+    # upscale 1080p + débruitage + netteté + contraste/saturation légèrement boostés.
+    out_w = 1080 if src_w < 1080 and src_h > src_w else src_w
+    out_h = int(src_h * out_w / src_w) // 2 * 2
+
     ass_file = exports / f"{row['name']}.ass"
     ass_file.write_text(
-        build_ass(cfg, width=row["width"] or 576, height=row["height"] or 1024,
+        build_ass(cfg, width=out_w, height=out_h,
                   duration=duration, title=row["title"] or "",
-                  words_file=words_file if words_file.exists() else None),
+                  words_file=words_file if words_file.exists() else None,
+                  skip_hook=(has_text == "texte")),
         encoding="utf-8")
 
     def _ffpath(p: str) -> str:
         return p.replace("\\", "/").replace(":", r"\:")
 
-    # Vidéo PLEIN ÉCRAN, textes par-dessus (demande de Michel : pas de bandes)
-    vf = f"ass='{_ffpath(str(ass_file))}'"
+    # Vidéo PLEIN ÉCRAN améliorée, textes par-dessus (pas de bandes)
+    vf = (
+        f"scale={out_w}:{out_h}:flags=lanczos,"
+        f"hqdn3d=1.5:1.5:6:6,"
+        f"unsharp=5:5:0.7:5:5:0.3,"
+        f"eq=contrast=1.05:saturation=1.14:brightness=0.008,"
+        f"ass='{_ffpath(str(ass_file))}'"
+    )
     cmd = [find_ffmpeg(), "-v", "error", "-i", str(src), "-vf", vf,
-           "-c:v", "libx264", "-preset", "veryfast", "-crf", "21",
+           "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
            "-c:a", "copy", "-movflags", "+faststart", "-y", str(out)]
     try:
         subprocess.run(cmd, capture_output=True, timeout=1800, check=True)
