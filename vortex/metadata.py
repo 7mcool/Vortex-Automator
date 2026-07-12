@@ -162,15 +162,33 @@ def prepare_video(cfg: Config, db: Database, video_id: int) -> bool:
 
     caption = row["caption"] or ""
     is_short = row["category"] == "short"
-    title = build_title(cfg, video_id, caption, transcript, is_short)
-    description = build_description(cfg, caption, transcript, video_id)
-    tags = build_tags(cfg, caption, transcript)
+
+    # Renfort IA (DeepSeek) : titres/descriptions corrigés et optimisés.
+    # En cas d'échec, repli transparent sur la génération locale.
+    from . import ai
+    source = "locale"
+    generated = None
+    if ai.available():
+        generated = ai.generate_metadata(
+            cfg.channel_name, cfg.author_name, caption, transcript,
+            row["duration_s"] or 0,
+        )
+    if generated:
+        source = "deepseek"
+        suffix = " #Shorts" if is_short else ""
+        title = (generated["title"] + suffix)[:100]
+        description = generated["description"]
+        tags = generated["tags"]
+    else:
+        title = build_title(cfg, video_id, caption, transcript, is_short)
+        description = build_description(cfg, caption, transcript, video_id)
+        tags = build_tags(cfg, caption, transcript)
 
     db.set_state(
-        video_id, "READY", "métadonnées générées",
+        video_id, "READY", f"métadonnées générées ({source})",
         title=title, description=description, tags=json.dumps(tags, ensure_ascii=False),
     )
-    log.info("Prête : [%d] %s", video_id, title)
+    log.info("Prête (%s) : [%d] %s", source, video_id, title)
     return True
 
 
