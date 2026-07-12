@@ -186,9 +186,15 @@ def execute_plan(cfg: Config, db: Database, plan: list[dict], live: bool) -> Non
             log.error("✘ Upload échoué pour %s : %s", row["name"], exc)
             continue
 
-        if row["cover_path"] and Path(row["cover_path"]).exists():
+        # Cover générée (style violet/or) prioritaire sur la cover TikTok
+        thumb = None
+        if "thumb_path" in row.keys() and row["thumb_path"] and Path(row["thumb_path"]).exists():
+            thumb = row["thumb_path"]
+        elif row["cover_path"] and Path(row["cover_path"]).exists():
+            thumb = row["cover_path"]
+        if thumb:
             try:
-                youtube_client.set_thumbnail(service, youtube_id, row["cover_path"])
+                youtube_client.set_thumbnail(service, youtube_id, thumb)
             except Exception as exc:
                 log.warning("Miniature refusée pour %s : %s", row["name"], exc)
         if cfg.upload_captions and row["srt_path"] and Path(row["srt_path"]).exists():
