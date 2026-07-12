@@ -33,6 +33,6 @@ services:
       - ./config.toml:/app/config.toml:ro
       - ./.env:/app/.env:ro
       - ./secrets:/app/secrets:ro
-      - ./data:/app/data:ro
+      - ./data:/app/data   # rw : SQLite en mode WAL écrit ses fichiers de travail
     mem_limit: 256m
     cpus: 0.3
