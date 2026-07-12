@@ -3,8 +3,14 @@ FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg tesseract-ocr tesseract-ocr-fra tesseract-ocr-eng \
-        fonts-dejavu-core \
-    && rm -rf /var/lib/apt/lists/*
+        fonts-dejavu-core fonts-liberation curl fontconfig \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /usr/share/fonts/truetype/custom \
+    && curl -sL -o /usr/share/fonts/truetype/custom/Anton-Regular.ttf \
+        "https://github.com/google/fonts/raw/main/ofl/anton/Anton-Regular.ttf" \
+    && curl -sL -o /usr/share/fonts/truetype/custom/ArchivoBlack-Regular.ttf \
+        "https://github.com/google/fonts/raw/main/ofl/archivoblack/ArchivoBlack-Regular.ttf" \
+    && fc-cache -f
 
 WORKDIR /app
 COPY requirements.txt .

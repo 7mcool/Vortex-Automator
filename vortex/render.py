@@ -27,12 +27,52 @@ from .textdetect import find_ffmpeg
 
 log = logging.getLogger("vortex.render")
 
-GOLD = r"\c&H00D7FF&"
 WHITE = r"\c&HFFFFFF&"
 
-CTA_ROTATION = ["► S'ABONNER", "❤ LIKE SI TU CROIS", "★ PARTAGE À UN AMI",
-                "✎ COMMENTE « AMEN »", "► ABONNE-TOI", "❤ DIS AMEN"]
-CTA_FINAL = "ABONNE-TOI ✚ PARTAGE"
+# ------------------------------------------------------------------ variété
+# Chaque vidéo tire son propre style (couleurs, police, textes) de façon
+# DÉTERMINISTE (seed = id) — demande de Michel : « toujours du nouveau,
+# police, couleurs, effets » (et YouTube pénalise l'uniformité de masse).
+
+ACCENTS = [  # hex ASS BBGGRR — accent accroche + mot karaoké
+    "00D7FF",  # or
+    "05FF2C",  # vert
+    "FFE500",  # cyan
+    "1C9FFF",  # orange
+    "B369FF",  # rose
+    "00E5FF",  # jaune
+]
+BADGE_COLORS = [  # fond du badge CTA (hex ASS BBGGRR)
+    "1323E6",  # rouge YouTube
+    "E66F1E",  # bleu
+    "AA2490",  # violet
+    "128CE6",  # orange foncé
+]
+FONT_POOL = ["DejaVu Sans", "Liberation Sans", "Anton", "Archivo Black"]
+
+CTA_POOL = [
+    "► S'ABONNER", "► ABONNE-TOI", "► ABONNE-TOI MAINTENANT",
+    "❤ LIKE SI TU CROIS", "❤ DIS AMEN",
+    "★ PARTAGE À UN AMI", "★ ENVOIE À QUELQU'UN", "★ PARTAGE CE MESSAGE",
+    "✎ COMMENTE « AMEN »", "✎ TON AVIS EN COMMENTAIRE",
+    "► REJOINS LA FAMILLE", "❤ SAUVEGARDE CETTE VIDÉO",
+]
+CTA_FINALS = ["ABONNE-TOI ✚ PARTAGE", "ABONNE-TOI ❤ MERCI", "REJOINS-NOUS ► ABONNE-TOI"]
+
+
+def _variant(video_id: int) -> dict:
+    """Style propre à la vidéo, stable dans le temps (seed = id)."""
+    import random
+    rng = random.Random(video_id * 2654435761 % 2**32)
+    return {
+        "accent": rng.choice(ACCENTS),
+        "kara": rng.choice(ACCENTS),
+        "badge_bg": rng.choice(BADGE_COLORS),
+        "font": rng.choice(FONT_POOL),
+        "ctas": rng.sample(CTA_POOL, 6),
+        "cta_final": rng.choice(CTA_FINALS),
+        "pulse_amp": rng.choice([108, 112, 116]),
+    }
 
 
 def _ass_time(seconds: float) -> str:
@@ -97,8 +137,11 @@ def _karaoke_events(words_file: Path, duration: float, max_chars: int) -> list[s
 
 
 def build_ass(cfg: Config, *, width: int, height: int, duration: float,
-              title: str, words_file: Path | None, skip_hook: bool = False) -> str:
-    fontname = _fontname()
+              title: str, words_file: Path | None, skip_hook: bool = False,
+              video_id: int = 0) -> str:
+    v = _variant(video_id)
+    fontname = v["font"] if not Path(r"C:\Windows\Fonts\arial.ttf").exists() else "Arial"
+    accent = r"\c&H" + v["accent"] + "&"
 
     # Tailles et marges relatives à la vidéo — textes RAPPROCHÉS DU CENTRE
     # (retour de Michel : plus visibles, jamais collés aux bords)
@@ -137,7 +180,7 @@ def build_ass(cfg: Config, *, width: int, height: int, duration: float,
     flat = " ".join(hook_lines)
     hook_txt = ""
     count = 0
-    hook_txt += "{" + GOLD + "}"
+    hook_txt += "{" + accent + "}"
     switched = False
     for line in hook_lines:
         for ch in line:
@@ -161,9 +204,9 @@ WrapStyle: 2
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Hook,{fontname},{fs_hook},&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,-1,-1,0,0,100,100,0.5,0,1,4,2,8,{margin_lr},{margin_lr},{hook_top},1
-Style: Karaoke,{fontname},{fs_kara},&H0005FF2C,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,1,0,1,5,3,2,{margin_lr},{margin_lr},{kara_bottom},1
-Style: BadgeBas,{fontname},{fs_badge},&H00FFFFFF,&H00FFFFFF,&H001323E6,&H001323E6,-1,0,0,0,100,100,1,0,3,{max(int(height/160), 8)},0,2,{margin_lr},{margin_lr},{badge_bottom},1
-Style: BadgeHaut,{fontname},{fs_badge},&H00FFFFFF,&H00FFFFFF,&H001323E6,&H001323E6,-1,0,0,0,100,100,1,0,3,{max(int(height/160), 8)},0,8,{margin_lr},{margin_lr},{badge_top},1
+Style: Karaoke,{fontname},{fs_kara},&H00{v["kara"]},&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,1,0,1,5,3,2,{margin_lr},{margin_lr},{kara_bottom},1
+Style: BadgeBas,{fontname},{fs_badge},&H00FFFFFF,&H00FFFFFF,&H00{v["badge_bg"]},&H00{v["badge_bg"]},-1,0,0,0,100,100,1,0,3,{max(int(height/160), 8)},0,2,{margin_lr},{margin_lr},{badge_bottom},1
+Style: BadgeHaut,{fontname},{fs_badge},&H00FFFFFF,&H00FFFFFF,&H00{v["badge_bg"]},&H00{v["badge_bg"]},-1,0,0,0,100,100,1,0,3,{max(int(height/160), 8)},0,8,{margin_lr},{margin_lr},{badge_top},1
 Style: Handle,{fontname},{fs_handle},&H38FFFFFF,&H38FFFFFF,&H38000000,&H00000000,-1,-1,0,0,100,100,1,0,1,2,0,8,{margin_lr},{margin_lr},{handle_top},1
 
 [Events]
@@ -181,13 +224,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             f"Dialogue: 1,{_ass_time(0.2)},{_ass_time(5.2)},Hook,,0,0,0,,{zoom_in}{hook_txt}")
     # CTA agressifs ÉPARPILLÉS : 6 fenêtres à des moments ET des positions
     # variés (bas / haut en alternance), taille auto-ajustée, pulsation.
-    pulse = r"{\fad(150,150)\t(0,180,\fscx112\fscy112)\t(180,360,\fscx100\fscy100)}"
+    amp = v["pulse_amp"]
+    pulse = (r"{\fad(150,150)\t(0,180,\fscx" + str(amp) + r"\fscy" + str(amp) +
+             r")\t(180,360,\fscx100\fscy100)}")
     for i, frac in enumerate((0.07, 0.21, 0.36, 0.51, 0.66, 0.80)):
         start = duration * frac
         end = min(start + 3.2, duration - 5.5)
         if end <= start:
             continue
-        txt = CTA_ROTATION[i % len(CTA_ROTATION)]
+        txt = v["ctas"][i % len(v["ctas"])]
         style = "BadgeBas" if i % 2 == 0 else "BadgeHaut"
         events.append(
             f"Dialogue: 1,{_ass_time(start)},{_ass_time(end)},{style},,0,0,0,,"
@@ -195,7 +240,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     # CTA final appuyé (5 dernières secondes, en bas)
     events.append(
         f"Dialogue: 1,{_ass_time(max(duration - 5.0, 0))},{_ass_time(duration)},BadgeBas,,0,0,0,,"
-        f"{{\\fs{badge_fs(CTA_FINAL)}}}{pulse}{CTA_FINAL}")
+        f"{{\\fs{badge_fs(v['cta_final'])}}}{pulse}{v['cta_final']}")
 
     if words_file and words_file.exists():
         events += _karaoke_events(words_file, duration, kara_chars)
@@ -230,7 +275,7 @@ def render_video(cfg: Config, db: Database, video_id: int) -> bool:
         build_ass(cfg, width=out_w, height=out_h,
                   duration=duration, title=row["title"] or "",
                   words_file=words_file if words_file.exists() else None,
-                  skip_hook=(has_text == "texte")),
+                  skip_hook=(has_text == "texte"), video_id=video_id),
         encoding="utf-8")
 
     def _ffpath(p: str) -> str:
