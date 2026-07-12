@@ -19,6 +19,7 @@ for P in $PROFILES; do
   echo "--- profil TikTok : @$P ---"
   yt-dlp \
     --format "bv*+ba/b" --merge-output-format mp4 \
+    --retries 10 --fragment-retries 10 --socket-timeout 30 \
     --download-archive "$VIDEOS_DIR/.yt-dlp-archive.txt" \
     --output "$VIDEOS_DIR/${P}_%(timestamp)s_%(id)s.%(ext)s" \
     --write-info-json \
@@ -35,4 +36,18 @@ for f in "$VIDEOS_DIR"/*.jpg; do
   base=$(basename "$f" .jpg)
   mv -f "$f" "$VIDEOS_DIR/cover/${base}_cover.jpeg"
 done
-echo "fetch_tiktok termine"
+
+# AUTO-RÉPARATION : un téléchargement partiel peut laisser un mp4 sans piste
+# audio (TikTok bride les vidéos longues). On le supprime et on retire son id
+# de l'archive -> il sera retéléchargé au prochain passage.
+purged=0
+for f in "$VIDEOS_DIR"/*.mp4; do
+  [ -e "$f" ] || continue
+  if ! ffprobe -v error -select_streams a -show_entries stream=codec_type -of csv=p=0 "$f" | grep -q audio; then
+    id=$(basename "$f" .mp4 | sed 's/.*_//')
+    grep -v "$id" "$VIDEOS_DIR/.yt-dlp-archive.txt" > /tmp/arch && cp /tmp/arch "$VIDEOS_DIR/.yt-dlp-archive.txt"
+    rm -f "$f"
+    purged=$((purged+1))
+  fi
+done
+echo "fetch_tiktok termine (fichiers muets purges pour re-essai : $purged)"
