@@ -1,14 +1,14 @@
-"""Phase 2 — Habillage visuel FFmpeg, UNIQUEMENT pour les vidéos sans texte incrusté.
+"""Phase 2 — Habillage visuel FFmpeg, OBLIGATOIRE pour TOUTES les vidéos.
 
-Règles de Michel :
-- ne JAMAIS toucher aux vidéos qui ont déjà des sous-titres/textes (has_text='texte');
-- les 'douteux' restent tels quels (validation manuelle possible plus tard) ;
-- l'original n'est JAMAIS modifié : on produit une copie dans data/exports/.
-
-Habillage v1 (sobre, varié par vidéo) :
-- accroche texte des 2,5 premières secondes (le titre, sans #Shorts) ;
-- rappel « Abonne-toi ✚ » discret en bas pendant les 3 dernières secondes ;
+Règle de Michel (12/07 soir) : les textes déjà présents dans les vidéos ne sont
+que des sous-titres simples — aucun appel à l'action stratégique. L'habillage
+s'applique donc à toutes les vidéos, SANS jamais retirer l'existant :
+- accroche texte des 2,5 premières secondes (haut de l'image — zone libre) ;
+- rappel « Abonne-toi ✚ » pendant les 3 dernières secondes (remonté si la
+  vidéo a déjà des sous-titres en bas, pour éviter le chevauchement) ;
 - filigrane du nom de la chaîne en haut (semi-transparent).
+L'original n'est JAMAIS modifié : copie habillée dans data/exports/.
+La détection OCR (has_text) sert à choisir la position du CTA.
 """
 
 from __future__ import annotations
@@ -62,9 +62,6 @@ def render_video(cfg: Config, db: Database, video_id: int) -> bool:
     if row is None:
         return False
     has_text = row["has_text"] if "has_text" in row.keys() else None
-    if has_text != "sans_texte":
-        log.info("Vidéo #%d ignorée (has_text=%s) — on ne touche pas à l'image", video_id, has_text)
-        return False
     src = Path(row["path"])
     if not src.exists():
         log.warning("Fichier inaccessible : %s", src)
@@ -73,23 +70,33 @@ def render_video(cfg: Config, db: Database, video_id: int) -> bool:
     exports = cfg.data_dir / "exports"
     exports.mkdir(parents=True, exist_ok=True)
     out = exports / f"{row['name']}_v.mp4"
-    font = find_font().replace("\\", "/").replace(":", r"\:")
+
+    def _ffpath(p: str) -> str:
+        return p.replace("\\", "/").replace(":", r"\:")
+
+    font = _ffpath(find_font())
     duration = row["duration_s"] or 30
 
+    # Le hook passe par un fichier texte : les apostrophes/caractères des titres
+    # français cassent l'échappement en ligne du filtre drawtext.
     hook = (row["title"] or "").replace(" #Shorts", "").strip()
-    hook_txt = _esc(_wrap(hook))
-    cta_txt = _esc("Abonne-toi ✚ et partage")
+    hook_file = exports / f"{row['name']}_hook.txt"
+    hook_file.write_text(_wrap(hook), encoding="utf-8")
+    cta_txt = "Abonne-toi + et partage"
     brand_txt = _esc(cfg.channel_name)
     cta_start = max(duration - 3.5, duration * 0.66)
+    # Si la vidéo a déjà des sous-titres (souvent en bas/centre), on remonte le
+    # CTA pour ne pas les chevaucher — on n'efface jamais rien.
+    cta_y = "h-7*text_h" if has_text in ("texte", "douteux") else "h-3*text_h"
 
     vf = (
         # Accroche : 0 -> 2,5 s, centrée dans le tiers haut, fond noir léger
-        f"drawtext=fontfile='{font}':text='{hook_txt}':fontsize=h/22:fontcolor=white:"
+        f"drawtext=fontfile='{font}':textfile='{_ffpath(str(hook_file))}':fontsize=h/22:fontcolor=white:"
         f"box=1:boxcolor=black@0.55:boxborderw=18:x=(w-text_w)/2:y=h/6:"
         f"enable='lt(t,2.5)',"
-        # CTA fin de vidéo, bas de l'écran
+        # CTA fin de vidéo
         f"drawtext=fontfile='{font}':text='{cta_txt}':fontsize=h/30:fontcolor=white:"
-        f"box=1:boxcolor=black@0.5:boxborderw=12:x=(w-text_w)/2:y=h-3*text_h:"
+        f"box=1:boxcolor=black@0.5:boxborderw=12:x=(w-text_w)/2:y={cta_y}:"
         f"enable='gt(t,{cta_start:.1f})',"
         # Filigrane discret permanent
         f"drawtext=fontfile='{font}':text='{brand_txt}':fontsize=h/45:fontcolor=white@0.45:"
@@ -103,6 +110,8 @@ def render_video(cfg: Config, db: Database, video_id: int) -> bool:
     except subprocess.CalledProcessError as exc:
         log.error("Rendu échoué pour %s : %s", row["name"], exc.stderr[-400:] if exc.stderr else exc)
         return False
+    finally:
+        hook_file.unlink(missing_ok=True)
 
     cols = [r[1] for r in db.conn.execute("PRAGMA table_info(videos)")]
     if "render_path" not in cols:
@@ -114,14 +123,21 @@ def render_video(cfg: Config, db: Database, video_id: int) -> bool:
 
 
 def render_pending(cfg: Config, db: Database, limit: int = 0) -> int:
-    """Rend les vidéos READY sans texte incrusté qui n'ont pas encore de rendu."""
+    """Habille les vidéos READY qui n'ont pas encore de rendu (TOUTES les vidéos,
+    dans le même ordre que la publication pour que les prochaines publiées
+    soient habillées en premier)."""
     cols = [r[1] for r in db.conn.execute("PRAGMA table_info(videos)")]
     if "render_path" not in cols:
         db.conn.execute("ALTER TABLE videos ADD COLUMN render_path TEXT")
         db.conn.commit()
-    sql = ("SELECT id FROM videos WHERE state = 'READY' AND has_text = 'sans_texte' "
-           "AND render_path IS NULL")
-    if limit:
-        sql += f" LIMIT {int(limit)}"
+    sql = ("SELECT id FROM videos WHERE state = 'READY' AND render_path IS NULL "
+           "ORDER BY CASE WHEN duration_s BETWEEN 30 AND 180 THEN 0 ELSE 1 END, "
+           "duration_s DESC")
     rows = db.conn.execute(sql).fetchall()
-    return sum(1 for r in rows if render_video(cfg, db, r["id"]))
+    done = 0
+    for r in rows:
+        if limit and done >= limit:
+            break
+        if render_video(cfg, db, r["id"]):
+            done += 1
+    return done
