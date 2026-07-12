@@ -1,14 +1,15 @@
-"""Habillage vidéo v3 — format « prédication » (template de Michel) + karaoké Submagic.
+"""Habillage vidéo v4 — plein écran + textes centrés avec effets pro (Submagic).
 
-Mise en page (canvas 1080×1920) :
-- bande noire HAUT : la citation-accroche en MAJUSCULES, 3 premiers mots en OR,
-  suite en blanc, visible en permanence ;
-- vidéo au centre (jamais recadrée, réduite pour tenir) ;
-- captions KARAOKÉ mot-à-mot dans le bas de la vidéo (MAJUSCULES, mot courant
-  en VERT, style Submagic/OpusClip) quand le timing des mots existe ;
-- bande noire BAS : @handle souligné + badges CTA en rotation pendant TOUTE la
-  vidéo : ► S'ABONNER / ❤ LIKE SI TU CROIS / ★ PARTAGE À UN AMI / ✎ COMMENTE « AMEN »
-  (demande de Michel : « un truc qui fait exploser le compte »).
+Retour de Michel (12/07 soir) : PAS de bandes noires, PAS de vidéo réduite —
+la vidéo reste PLEIN ÉCRAN et les textes apparaissent PAR-DESSUS, centrés,
+avec des effets pro et des marges de sécurité loin des bords :
+- accroche (5 premières secondes) : MAJUSCULES, 3 premiers mots OR + suite
+  blanc, contour noir épais, fondu + zoom d'entrée, tiers haut de l'écran ;
+- karaoké mot-à-mot GROS au centre-bas (~2/3 de la hauteur), mot courant VERT,
+  pop à chaque groupe de mots (style Submagic/OpusClip) ;
+- badges CTA rouges pulsés, centrés au-dessus du bord bas (marge 12 %) :
+  ► S'ABONNER / ❤ LIKE SI TU CROIS / ★ PARTAGE À UN AMI / ✎ COMMENTE « AMEN » ;
+- filigrane @handle discret en haut.
 
 L'original n'est JAMAIS modifié : copie habillée dans data/exports/.
 """
@@ -25,10 +26,6 @@ from .db import Database
 from .textdetect import find_ffmpeg
 
 log = logging.getLogger("vortex.render")
-
-CANVAS_W, CANVAS_H = 1080, 1920
-BAND_TOP, BAND_BOTTOM = 320, 240
-VIDEO_H = CANVAS_H - BAND_TOP - BAND_BOTTOM  # 1360
 
 GOLD = r"\c&H00D7FF&"
 WHITE = r"\c&HFFFFFF&"
@@ -94,7 +91,8 @@ def _karaoke_events(words_file: Path, duration: float) -> list[str]:
     return out
 
 
-def build_ass(cfg: Config, *, duration: float, title: str, words_file: Path | None) -> str:
+def build_ass(cfg: Config, *, width: int, height: int, duration: float,
+              title: str, words_file: Path | None) -> str:
     fontname = _fontname()
 
     hook = title.replace(" #Shorts", "").strip().upper()
@@ -131,25 +129,38 @@ def build_ass(cfg: Config, *, duration: float, title: str, words_file: Path | No
 
     handle = "@sophos_prophetikos"
 
+    # Tailles et marges relatives à la vidéo (plein écran, textes loin des bords)
+    fs_hook = int(height / 17)
+    fs_kara = int(height / 13)
+    fs_badge = int(height / 20)
+    fs_handle = int(height / 34)
+    margin_lr = int(width * 0.07)
+    hook_top = int(height * 0.12)
+    kara_bottom = int(height * 0.30)   # captions au centre-bas (~2/3 de la hauteur)
+    badge_bottom = int(height * 0.12)
+    handle_top = int(height * 0.03)
+
     header = f"""[Script Info]
 ScriptType: v4.00+
-PlayResX: {CANVAS_W}
-PlayResY: {CANVAS_H}
+PlayResX: {width}
+PlayResY: {height}
 WrapStyle: 2
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Hook,{fontname},62,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,-1,0,0,100,100,0.5,0,1,4,0,8,36,36,30,1
-Style: Karaoke,{fontname},64,&H0005FF2C,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,1,0,1,5,2,2,50,50,{BAND_BOTTOM + 40},1
-Style: Badge,{fontname},56,&H00FFFFFF,&H00FFFFFF,&H001323E6,&H001323E6,-1,0,0,0,100,100,1,0,3,14,0,2,40,40,116,1
-Style: Handle,{fontname},40,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,-1,-1,0,100,100,1,0,1,2,0,2,40,40,34,1
+Style: Hook,{fontname},{fs_hook},&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,-1,-1,0,0,100,100,0.5,0,1,4,2,8,{margin_lr},{margin_lr},{hook_top},1
+Style: Karaoke,{fontname},{fs_kara},&H0005FF2C,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,1,0,1,5,3,2,{margin_lr},{margin_lr},{kara_bottom},1
+Style: Badge,{fontname},{fs_badge},&H00FFFFFF,&H00FFFFFF,&H001323E6,&H001323E6,-1,0,0,0,100,100,1,0,3,{max(int(height/160), 8)},0,2,{margin_lr},{margin_lr},{badge_bottom},1
+Style: Handle,{fontname},{fs_handle},&H50FFFFFF,&H50FFFFFF,&H50000000,&H00000000,-1,-1,0,0,100,100,1,0,1,2,0,8,{margin_lr},{margin_lr},{handle_top},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
+    zoom_in = r"{\fad(250,300)\t(0,250,\fscx104\fscy104)\t(250,500,\fscx100\fscy100)}"
     events = [
-        f"Dialogue: 1,{_ass_time(0)},{_ass_time(duration)},Hook,,0,0,0,,{hook_txt}",
-        f"Dialogue: 1,{_ass_time(0)},{_ass_time(duration)},Handle,,0,0,0,,{handle}",
+        # Accroche : 5 premières secondes seulement (elle recouvre la vidéo)
+        f"Dialogue: 1,{_ass_time(0.2)},{_ass_time(5.2)},Hook,,0,0,0,,{zoom_in}{hook_txt}",
+        f"Dialogue: 0,{_ass_time(0)},{_ass_time(duration)},Handle,,0,0,0,,{handle}",
     ]
     # CTA agressifs : 5 fenêtres de 3,5 s réparties sur toute la durée,
     # avec pulsation d'attention (Michel : « inciter les gens à passer à l'action »)
@@ -190,18 +201,16 @@ def render_video(cfg: Config, db: Database, video_id: int) -> bool:
 
     ass_file = exports / f"{row['name']}.ass"
     ass_file.write_text(
-        build_ass(cfg, duration=duration, title=row["title"] or "",
+        build_ass(cfg, width=row["width"] or 576, height=row["height"] or 1024,
+                  duration=duration, title=row["title"] or "",
                   words_file=words_file if words_file.exists() else None),
         encoding="utf-8")
 
     def _ffpath(p: str) -> str:
         return p.replace("\\", "/").replace(":", r"\:")
 
-    vf = (
-        f"scale={CANVAS_W}:{VIDEO_H}:force_original_aspect_ratio=decrease,"
-        f"pad={CANVAS_W}:{CANVAS_H}:(ow-iw)/2:{BAND_TOP}+({VIDEO_H}-ih)/2:color=black,"
-        f"ass='{_ffpath(str(ass_file))}'"
-    )
+    # Vidéo PLEIN ÉCRAN, textes par-dessus (demande de Michel : pas de bandes)
+    vf = f"ass='{_ffpath(str(ass_file))}'"
     cmd = [find_ffmpeg(), "-v", "error", "-i", str(src), "-vf", vf,
            "-c:v", "libx264", "-preset", "veryfast", "-crf", "21",
            "-c:a", "copy", "-movflags", "+faststart", "-y", str(out)]
