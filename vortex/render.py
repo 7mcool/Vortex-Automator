@@ -61,8 +61,9 @@ def _fontname() -> str:
     return "Arial" if Path(r"C:\Windows\Fonts\arial.ttf").exists() else "DejaVu Sans"
 
 
-def _karaoke_events(words_file: Path, duration: float) -> list[str]:
-    """Chunks de 3 mots max, mot courant vert via \\k (style Submagic)."""
+def _karaoke_events(words_file: Path, duration: float, max_chars: int) -> list[str]:
+    """Chunks courts, mot courant vert via \\k (style Submagic).
+    max_chars est calculé depuis la largeur réelle de la vidéo."""
     try:
         words = json.loads(words_file.read_text(encoding="utf-8"))
     except Exception:
@@ -70,10 +71,13 @@ def _karaoke_events(words_file: Path, duration: float) -> list[str]:
     events = []
     chunk: list[dict] = []
     for w in words:
+        # un mot seul trop long part dans son propre chunk
+        if chunk and sum(len(x["w"]) + 1 for x in chunk) + len(w["w"]) > max_chars:
+            events.append(chunk)
+            chunk = []
         chunk.append(w)
         span = chunk[-1]["e"] - chunk[0]["s"]
-        chars = sum(len(x["w"]) + 1 for x in chunk)
-        if len(chunk) >= 3 or span >= 1.6 or chars >= 15:
+        if len(chunk) >= 3 or span >= 1.6:
             events.append(chunk)
             chunk = []
     if chunk:
@@ -106,9 +110,7 @@ def build_ass(cfg: Config, *, width: int, height: int, duration: float,
         words[-1] = words[-1].rstrip(",;:-") + "…"
     gold_txt = " ".join(words[:3])
     rest_txt = " ".join(words[3:])
-    hook_lines = []
-    for i, line in enumerate(_wrap(f"{gold_txt}\x00{rest_txt}".replace("\x00", " "), 21, 4)):
-        hook_lines.append(line)
+    hook_lines = list(_wrap(f"{gold_txt} {rest_txt}".strip(), hook_chars, 4))
     # Couleur : on passe au blanc dès que les mots dorés sont épuisés
     gold_chars = len(gold_txt)
     flat = " ".join(hook_lines)
@@ -130,11 +132,14 @@ def build_ass(cfg: Config, *, width: int, height: int, duration: float,
     handle = "@sophos_prophetikos"
 
     # Tailles et marges relatives à la vidéo (plein écran, textes loin des bords)
-    fs_hook = int(height / 17)
-    fs_kara = int(height / 13)
+    fs_hook = int(height / 18)
+    fs_kara = int(height / 15)
     fs_badge = int(height / 20)
     fs_handle = int(height / 34)
     margin_lr = int(width * 0.07)
+    # Largeur maximale des lignes CALCULÉE (bold uppercase ≈ 0,62 × fontsize par caractère)
+    hook_chars = max(int(width * 0.86 / (fs_hook * 0.62)), 8)
+    kara_chars = max(int(width * 0.86 / (fs_kara * 0.62)), 6)
     hook_top = int(height * 0.12)
     kara_bottom = int(height * 0.30)   # captions au centre-bas (~2/3 de la hauteur)
     badge_bottom = int(height * 0.12)
@@ -179,7 +184,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         f"{pulse}{CTA_FINAL}")
 
     if words_file and words_file.exists():
-        events += _karaoke_events(words_file, duration)
+        events += _karaoke_events(words_file, duration, kara_chars)
 
     return header + "\n".join(events) + "\n"
 
