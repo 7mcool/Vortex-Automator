@@ -1,34 +1,5 @@
-# Core dependencies
-openai>=1.30.0
-whisper-openai>=20231117
-torch>=2.3.0
-torchaudio>=2.3.0
-tqdm>=4.66.0
-python-dotenv>=1.0.0
-requests>=2.31.0
-
-# Google API dependencies
-google-auth>=2.27.0
-google-auth-oauthlib>=1.2.0
-google-auth-httplib2>=0.2.0
-google-api-python-client>=2.120.0
-
-# Audio/Video processing
-ffmpeg-python>=0.2.0
-pydub>=0.25.1
-librosa>=0.10.1
-
-# Utilities
-python-dateutil>=2.9.0
-pytz>=2024.1
-tzlocal>=5.2
-watchdog>=4.0.0
-glob2>=0.7
-
-# Additional AI tools (si DeepSeek est utilisé)
-transformers>=4.40.0
-sentencepiece>=0.2.0
-accelerate>=0.29.0
-
-# Logging and monitoring
-loguru>=0.7.2
+# Vortex Automator v2 — dépendances minimales (tout est gratuit)
+faster-whisper>=1.0          # transcription locale (CPU, int8) — pas besoin de torch
+google-api-python-client>=2.100
+google-auth-oauthlib>=1.0
+google-auth-httplib2>=0.1

@@ -1,0 +1,34 @@
+# Configuration Vortex Automator — AUCUN SECRET ICI (les secrets vont dans .env / secrets/)
+
+[paths]
+source_dir = 'E:\hedjav\4K Tokkit\hedjav'
+tokkit_db = 'E:\hedjav\4K Tokkit\data.sqlite'
+data_dir = 'data'                                   # relatif à la racine du dépôt
+client_secret_file = 'secrets\client_secret.json'
+token_file = 'secrets\youtube_token.json'
+
+[publish]
+hours = [9, 12, 15, 18, 21]      # 5 créneaux par jour
+daily_limit = 5
+timezone = "Africa/Porto-Novo"   # Cotonou, Bénin (UTC+1, sans heure d'été)
+category_id = "27"               # Éducation
+language = "fr"
+made_for_kids = false
+notify_subscribers = true
+playlist_id = ""
+
+[whisper]
+model = "small"        # small = bon compromis vitesse/qualité sur CPU
+device = "cpu"
+compute_type = "int8"
+
+[seo]
+channel_name = "Sophos PropheTikos"
+author_name = "Jacques Amessan"
+hashtags = ["#foi", "#motivation", "#JacquesAmessan"]
+max_title_len = 95
+tags_count = 15
+
+[video]
+shorts_max_seconds = 180   # Shorts YouTube : jusqu'à 3 minutes
+min_duration_seconds = 5
