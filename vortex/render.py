@@ -75,7 +75,8 @@ def _karaoke_events(words_file: Path, duration: float) -> list[str]:
     for w in words:
         chunk.append(w)
         span = chunk[-1]["e"] - chunk[0]["s"]
-        if len(chunk) >= 3 or span >= 1.6:
+        chars = sum(len(x["w"]) + 1 for x in chunk)
+        if len(chunk) >= 3 or span >= 1.6 or chars >= 15:
             events.append(chunk)
             chunk = []
     if chunk:
@@ -100,11 +101,15 @@ def build_ass(cfg: Config, *, duration: float, title: str, words_file: Path | No
     words = hook.split()
     if len(words) > 12:
         words = words[:12]
+    # Retire les fragments disgracieux en fin d'accroche (tirets, attributions coupées…)
+    while words and (words[-1].strip("-–—|.…") == "" or words[-1].rstrip(".…") in ("EV", "ÉV", "PST", "PASTEUR")):
+        words.pop()
+    if len(hook.split()) > len(words):
         words[-1] = words[-1].rstrip(",;:-") + "…"
     gold_txt = " ".join(words[:3])
     rest_txt = " ".join(words[3:])
     hook_lines = []
-    for i, line in enumerate(_wrap(f"{gold_txt}\x00{rest_txt}".replace("\x00", " "), 24, 4)):
+    for i, line in enumerate(_wrap(f"{gold_txt}\x00{rest_txt}".replace("\x00", " "), 21, 4)):
         hook_lines.append(line)
     # Couleur : on passe au blanc dès que les mots dorés sont épuisés
     gold_chars = len(gold_txt)
@@ -134,9 +139,9 @@ WrapStyle: 2
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Hook,{fontname},58,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,-1,0,0,100,100,0.5,0,1,3,0,8,40,40,36,1
-Style: Karaoke,{fontname},76,&H0005FF2C,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,1,0,1,5,2,2,40,40,{BAND_BOTTOM + 40},1
-Style: Badge,{fontname},52,&H00FFFFFF,&H00FFFFFF,&H001323E6,&H001323E6,-1,0,0,0,100,100,1,0,3,12,0,2,40,40,120,1
+Style: Hook,{fontname},62,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,-1,0,0,100,100,0.5,0,1,4,0,8,36,36,30,1
+Style: Karaoke,{fontname},64,&H0005FF2C,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,1,0,1,5,2,2,50,50,{BAND_BOTTOM + 40},1
+Style: Badge,{fontname},56,&H00FFFFFF,&H00FFFFFF,&H001323E6,&H001323E6,-1,0,0,0,100,100,1,0,3,14,0,2,40,40,116,1
 Style: Handle,{fontname},40,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,-1,-1,0,100,100,1,0,1,2,0,2,40,40,34,1
 
 [Events]
@@ -146,19 +151,21 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         f"Dialogue: 1,{_ass_time(0)},{_ass_time(duration)},Hook,,0,0,0,,{hook_txt}",
         f"Dialogue: 1,{_ass_time(0)},{_ass_time(duration)},Handle,,0,0,0,,{handle}",
     ]
-    # CTA en rotation sur toute la durée (fenêtres de 3 s à 15/35/55/75 %)
-    for i, frac in enumerate((0.15, 0.35, 0.55, 0.75)):
+    # CTA agressifs : 5 fenêtres de 3,5 s réparties sur toute la durée,
+    # avec pulsation d'attention (Michel : « inciter les gens à passer à l'action »)
+    pulse = r"{\fad(150,150)\t(0,180,\fscx112\fscy112)\t(180,360,\fscx100\fscy100)}"
+    for i, frac in enumerate((0.08, 0.27, 0.46, 0.65, 0.82)):
         start = duration * frac
-        end = min(start + 3.0, duration - 4.5)
+        end = min(start + 3.5, duration - 5.5)
         if end <= start:
             continue
         txt = CTA_ROTATION[i % len(CTA_ROTATION)]
         events.append(
-            f"Dialogue: 1,{_ass_time(start)},{_ass_time(end)},Badge,,0,0,0,,{{\\fad(200,200)}}{txt}")
-    # CTA final appuyé
+            f"Dialogue: 1,{_ass_time(start)},{_ass_time(end)},Badge,,0,0,0,,{pulse}{txt}")
+    # CTA final appuyé (5 dernières secondes)
     events.append(
-        f"Dialogue: 1,{_ass_time(max(duration - 4.0, 0))},{_ass_time(duration)},Badge,,0,0,0,,"
-        f"{{\\fad(250,0)}}{CTA_FINAL}")
+        f"Dialogue: 1,{_ass_time(max(duration - 5.0, 0))},{_ass_time(duration)},Badge,,0,0,0,,"
+        f"{pulse}{CTA_FINAL}")
 
     if words_file and words_file.exists():
         events += _karaoke_events(words_file, duration)
