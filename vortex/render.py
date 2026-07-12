@@ -79,27 +79,38 @@ def render_video(cfg: Config, db: Database, video_id: int) -> bool:
 
     # Le hook passe par un fichier texte : les apostrophes/caractères des titres
     # français cassent l'échappement en ligne du filtre drawtext.
+    # Largeur : 18 caractères par ligne à fontsize h/26 tiennent dans une
+    # vidéo verticale (vérifié sur 576×1024 — le débordement du 1er essai
+    # venait de 26 chars à h/22).
     hook = (row["title"] or "").replace(" #Shorts", "").strip()
     hook_file = exports / f"{row['name']}_hook.txt"
-    hook_file.write_text(_wrap(hook), encoding="utf-8")
+    hook_file.write_text(_wrap(hook, width=18, max_lines=4), encoding="utf-8")
     cta_txt = "Abonne-toi + et partage"
+    mid_txt = "Abonne-toi pour la suite"
     brand_txt = _esc(cfg.channel_name)
     cta_start = max(duration - 3.5, duration * 0.66)
-    # Si la vidéo a déjà des sous-titres (souvent en bas/centre), on remonte le
-    # CTA pour ne pas les chevaucher — on n'efface jamais rien.
-    cta_y = "h-7*text_h" if has_text in ("texte", "douteux") else "h-3*text_h"
+    mid_start = duration * 0.45
+    mid_end = min(mid_start + 3.0, cta_start - 1)
+    # Si la vidéo a déjà des sous-titres (souvent en bas/centre), on remonte les
+    # bandeaux pour ne pas les chevaucher — on n'efface jamais rien.
+    lifted = has_text in ("texte", "douteux")
+    cta_y = "h-7*text_h" if lifted else "h-3*text_h"
 
     vf = (
-        # Accroche : 0 -> 2,5 s, centrée dans le tiers haut, fond noir léger
-        f"drawtext=fontfile='{font}':textfile='{_ffpath(str(hook_file))}':fontsize=h/22:fontcolor=white:"
-        f"box=1:boxcolor=black@0.55:boxborderw=18:x=(w-text_w)/2:y=h/6:"
-        f"enable='lt(t,2.5)',"
+        # Accroche : 0 -> 4 s, centrée dans le tiers haut, fond noir léger
+        f"drawtext=fontfile='{font}':textfile='{_ffpath(str(hook_file))}':fontsize=h/26:fontcolor=white:"
+        f"box=1:boxcolor=black@0.55:boxborderw=16:x=(w-text_w)/2:y=h/7:"
+        f"enable='lt(t,4)',"
+        # Rappel bref en milieu de vidéo
+        f"drawtext=fontfile='{font}':text='{mid_txt}':fontsize=h/32:fontcolor=white:"
+        f"box=1:boxcolor=black@0.5:boxborderw=10:x=(w-text_w)/2:y={cta_y}:"
+        f"enable='between(t,{mid_start:.1f},{mid_end:.1f})',"
         # CTA fin de vidéo
         f"drawtext=fontfile='{font}':text='{cta_txt}':fontsize=h/30:fontcolor=white:"
         f"box=1:boxcolor=black@0.5:boxborderw=12:x=(w-text_w)/2:y={cta_y}:"
         f"enable='gt(t,{cta_start:.1f})',"
         # Filigrane discret permanent
-        f"drawtext=fontfile='{font}':text='{brand_txt}':fontsize=h/45:fontcolor=white@0.45:"
+        f"drawtext=fontfile='{font}':text='{brand_txt}':fontsize=h/42:fontcolor=white@0.5:"
         f"x=(w-text_w)/2:y=h/40"
     )
     cmd = [find_ffmpeg(), "-v", "error", "-i", str(src), "-vf", vf,
