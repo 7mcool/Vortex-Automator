@@ -72,6 +72,9 @@ def _variant(video_id: int) -> dict:
         "ctas": rng.sample(CTA_POOL, 6),
         "cta_final": rng.choice(CTA_FINALS),
         "pulse_amp": rng.choice([108, 112, 116]),
+        # style des captions : karaoké (groupe + mot illuminé) ou word-pop
+        # (1-2 mots géants façon Hormozi) — 50/50
+        "caption_mode": rng.choice(["karaoke", "pop"]),
     }
 
 
@@ -102,8 +105,35 @@ def _fontname() -> str:
     return "Arial" if Path(r"C:\Windows\Fonts\arial.ttf").exists() else "DejaVu Sans"
 
 
+def _pop_events(words_file: Path, duration: float, fs_pop: int = 0) -> list[str]:
+    """Style word-pop (Hormozi) : 1-2 mots géants qui apparaissent au moment
+    où ils sont prononcés, avec un petit rebond d'échelle."""
+    try:
+        words = json.loads(words_file.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    out = []
+    i = 0
+    while i < len(words):
+        # regroupe 2 mots très courts, sinon 1 mot
+        group = [words[i]]
+        if (i + 1 < len(words) and len(words[i]["w"]) <= 4
+                and words[i + 1]["s"] - words[i]["e"] < 0.25):
+            group.append(words[i + 1])
+        start = group[0]["s"]
+        end = max(group[-1]["e"], start + 0.28)
+        if i + len(group) < len(words):
+            end = min(end + 0.12, words[i + len(group)]["s"])
+        txt = " ".join(w["w"].upper() for w in group)
+        fs_tag = f"{{\\fs{fs_pop}}}" if fs_pop else ""
+        pop = r"{\fad(40,30)\t(0,110,\fscx118\fscy118)\t(110,220,\fscx100\fscy100)}"
+        out.append(f"Dialogue: 2,{_ass_time(start)},{_ass_time(min(end, duration))},Karaoke,,0,0,0,,{fs_tag}{pop}{txt}")
+        i += len(group)
+    return out
+
+
 def _karaoke_events(words_file: Path, duration: float, max_chars: int) -> list[str]:
-    """Chunks courts, mot courant vert via \\k (style Submagic).
+    """Chunks courts, mot courant illuminé via \\k (style Submagic).
     max_chars est calculé depuis la largeur réelle de la vidéo."""
     try:
         words = json.loads(words_file.read_text(encoding="utf-8"))
@@ -243,7 +273,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         f"{{\\fs{badge_fs(v['cta_final'])}}}{pulse}{v['cta_final']}")
 
     if words_file and words_file.exists():
-        events += _karaoke_events(words_file, duration, kara_chars)
+        if v["caption_mode"] == "pop":
+            events += _pop_events(words_file, duration, fs_pop=int(height / 10))
+        else:
+            events += _karaoke_events(words_file, duration, kara_chars)
 
     return header + "\n".join(events) + "\n"
 
@@ -265,9 +298,10 @@ def render_video(cfg: Config, db: Database, video_id: int) -> bool:
 
     has_text = row["has_text"] if "has_text" in row.keys() else None
     src_w, src_h = row["width"] or 576, row["height"] or 1024
-    # Amélioration de qualité (retour de Michel : « les vidéos sont pas claires ») :
-    # upscale 1080p + débruitage + netteté + contraste/saturation légèrement boostés.
-    out_w = 1080 if src_w < 1080 and src_h > src_w else src_w
+    # Amélioration de qualité (« 1080p et plus ») : upscale vers la largeur cible
+    # + débruitage + netteté + contraste/saturation légèrement boostés.
+    target_w = getattr(cfg, "render_width", 1080)
+    out_w = target_w if src_w < target_w and src_h > src_w else src_w
     out_h = int(src_h * out_w / src_w) // 2 * 2
 
     ass_file = exports / f"{row['name']}.ass"
