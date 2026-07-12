@@ -77,10 +77,13 @@ def build_ass(cfg: Config, *, width: int, height: int, duration: float,
 
     hook = title.replace(" #Shorts", "").strip()
     words = hook.split()
+    if len(words) > 9:  # accroche courte = accroche lue (le titre complet reste dans les métadonnées)
+        words = words[:9]
+        words[-1] = words[-1].rstrip(",;:-") + "…"
     gold_part = " ".join(words[:3])
     rest_part = " ".join(words[3:])
-    # \N tous les ~20 caractères pour rester dans le cadre
-    def wrap_ass(text: str, w: int = 20) -> str:
+    # \N tous les ~16 caractères pour rester dans le cadre
+    def wrap_ass(text: str, w: int = 16) -> str:
         lines, cur = [], ""
         for word in text.split():
             if len(cur) + len(word) + 1 > w and cur:
@@ -96,7 +99,7 @@ def build_ass(cfg: Config, *, width: int, height: int, duration: float,
     white = r"{\c&HFFFFFF&}"
     hook_txt = gold + wrap_ass(gold_part) + (r"\N" + white + wrap_ass(rest_part) if rest_part else "")
 
-    fs_hook = int(height / 16)
+    fs_hook = int(height / 19)
     fs_badge = int(height / 26)
     fs_brand = int(height / 42)
     margin_badge = int(height * (0.30 if lifted else 0.12))
