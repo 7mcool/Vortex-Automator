@@ -53,26 +53,75 @@ RÈGLES ABSOLUES :
 Réponds UNIQUEMENT avec le JSON."""
 
 
+def _audio_duration(path: str) -> float:
+    out = subprocess.run(
+        [find_ffmpeg().replace("ffmpeg", "ffprobe"), "-v", "quiet",
+         "-show_entries", "format=duration", "-of", "csv=p=0", path],
+        capture_output=True, text=True, timeout=120)
+    try:
+        return float(out.stdout.strip())
+    except (ValueError, AttributeError):
+        return 0.0
+
+
 def _transcribe_timed(cfg: Config, path: str) -> tuple[list, float]:
-    # Modèle LÉGER dédié au repérage des extraits sur une source longue (jusqu'à
-    # 2 h) : sur un VPS avec peu de RAM libre, le modèle 'small' déclenche l'OOM.
-    # Cette transcription ne sert qu'à situer les bons passages — chaque extrait
-    # court est ensuite re-transcrit en 'small' au stade des sous-titres, donc la
-    # qualité finale n'est pas affectée. Surchargeable via cfg.clip_whisper_model.
+    # Repérage des extraits sur une source longue (jusqu'à 2 h). Sur un VPS avec
+    # peu de RAM libre, transcrire 2 h d'un coup fait exploser la mémoire (OOM) :
+    # faster-whisper décode TOUT l'audio en mémoire d'abord. On découpe donc en
+    # tranches de 10 min transcrites une par une — la mémoire reste minuscule.
+    # Modèle LÉGER 'base' : cette transcription ne sert qu'à SITUER les passages ;
+    # chaque extrait court est re-transcrit en 'small' au stade des sous-titres,
+    # donc aucune perte de qualité finale. Surchargeable via cfg.clip_whisper_model.
     from faster_whisper import WhisperModel
     import gc
     import os
+    import tempfile
+
     model_name = getattr(cfg, "clip_whisper_model", None) or "base"
-    log.info("Transcription de repérage (modèle léger '%s')…", model_name)
+    chunk_s = int(getattr(cfg, "clip_chunk_seconds", 0) or 600)
+    duration = _audio_duration(path)
+    log.info("Transcription de repérage (modèle '%s', source %.0f min, tranches de %d min)…",
+             model_name, duration / 60, chunk_s // 60)
     model = WhisperModel(model_name, device=cfg.whisper_device,
                          compute_type=cfg.whisper_compute,
                          cpu_threads=os.cpu_count() or 2)
-    segments_iter, info = model.transcribe(path, vad_filter=True)
-    segs = [(round(s.start, 1), round(s.end, 1), s.text.strip())
-            for s in segments_iter if s.text.strip()]
-    del model
-    gc.collect()
-    return segs, info.duration
+    segs: list = []
+    try:
+        if duration and duration > chunk_s * 1.5:
+            ffmpeg = find_ffmpeg()
+            start = 0.0
+            while start < duration:
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tf:
+                    wav = tf.name
+                try:
+                    subprocess.run(
+                        [ffmpeg, "-v", "error", "-ss", f"{start:.1f}",
+                         "-t", f"{chunk_s}", "-i", path,
+                         "-vn", "-ac", "1", "-ar", "16000", "-y", wav],
+                        capture_output=True, timeout=600, check=True)
+                    seg_iter, _ = model.transcribe(wav, vad_filter=True)
+                    for s in seg_iter:
+                        if s.text.strip():
+                            segs.append((round(s.start + start, 1),
+                                         round(s.end + start, 1), s.text.strip()))
+                finally:
+                    try:
+                        os.remove(wav)
+                    except OSError:
+                        pass
+                    gc.collect()
+                log.info("  … %.0f/%.0f min transcrites (%d segments)",
+                         min(start + chunk_s, duration) / 60, duration / 60, len(segs))
+                start += chunk_s
+        else:
+            seg_iter, info = model.transcribe(path, vad_filter=True)
+            segs = [(round(s.start, 1), round(s.end, 1), s.text.strip())
+                    for s in seg_iter if s.text.strip()]
+            duration = duration or info.duration
+    finally:
+        del model
+        gc.collect()
+    return segs, duration
 
 
 def _ask_clips(cfg: Config, segs: list, duration: float) -> list[dict]:
