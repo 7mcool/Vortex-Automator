@@ -38,7 +38,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="vortex", description="Vortex Automator — pipeline YouTube")
     parser.add_argument("command", choices=[
         "scan", "transcribe", "prepare", "plan", "publish", "sync-channel", "status", "auth",
-        "retry", "engage", "detect-text", "render", "thumbs",
+        "retry", "engage", "detect-text", "render", "thumbs", "clip",
     ])
     parser.add_argument("-n", "--count", type=int, default=5,
                         help="nombre de vidéos à traiter (défaut : 5)")
@@ -92,6 +92,11 @@ def main(argv: list[str] | None = None) -> int:
             from .render import render_pending
             n = render_pending(cfg, db, limit=args.count)
             print(f"{n} vidéo(s) habillée(s) (hook + CTA + filigrane)")
+
+        elif args.command == "clip":
+            from .clipper import process_one_source
+            n = process_one_source(cfg, db)
+            print(f"{n} extrait(s) créé(s) depuis une vidéo source")
 
         elif args.command == "thumbs":
             from .thumbs import thumbs_pending

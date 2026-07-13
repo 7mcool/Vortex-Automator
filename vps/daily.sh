@@ -7,6 +7,11 @@ echo "=== [$(date)] ROUTINE VPS ==="
 # 1. Nouvelles vidéos TikTok (directement sur le serveur)
 sh vps/fetch_tiktok.sh /app/videos/hedjav
 
+# 1bis. Chaînes YouTube sources (Phase 5) + découpage intelligent d'UNE
+# longue vidéo par jour (3-8 extraits alimentent la file de publication)
+sh vps/fetch_youtube.sh /app/videos/sources 2
+python -m vortex clip
+
 # 2. Pipeline complet
 python -m vortex scan
 python -m vortex retry
