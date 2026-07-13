@@ -118,12 +118,21 @@ IMPACT_WORDS = {"PAS", "JAMAIS", "ERREUR", "DANGER", "BLOQUE", "BLOQUES", "ATTEN
                 "STOP", "FAUX", "PIÈGE", "PIEGE", "PÉCHÉ", "PECHE", "MORT", "PERDU", "PERDUES"}
 
 
+STOP_TAIL = {":", "-", "—", "LA", "LE", "LES", "DE", "DES", "DU", "ET", "OU",
+             "AVEC", "POUR", "QUI", "QUE", "EN", "UN", "UNE", "TA", "TON", "TES"}
+
+
 def _short_words(title: str, max_words: int = 6) -> list[str]:
     words = title.replace(" #Shorts", "").strip().upper().split()
-    if len(words) > max_words:
-        words = words[:max_words]
+    truncated = len(words) > max_words
+    words = words[:max_words]
+    # jamais de fin bancale (« : LA… ») : on retire les petits mots de liaison
+    while words and words[-1].strip(",;:-.…") in STOP_TAIL | {""}:
+        words.pop()
+        truncated = True
+    if truncated and words:
         words[-1] = words[-1].rstrip(",;:-.") + "…"
-    return words
+    return words or ["MESSAGE", "PUISSANT"]
 
 
 def _impact_lines(title: str) -> str:
@@ -182,8 +191,13 @@ def _html(cfg: Config, video_id: int, title: str, subject_uri: str, is_card: boo
     if logo_file.exists():
         logo_uri = _b64(logo_file.read_bytes())
     title_html = _impact_lines(title)
-    n_words = len(_short_words(title))
+    short = _short_words(title)
+    n_words = len(short)
     fs = 148 if n_words <= 4 else (124 if n_words <= 6 else 104)
+    # le mot le plus long doit tenir dans la zone de texte (0,62 × fs par caractère)
+    zone = W * (0.55 if subject_uri else 0.84)
+    longest = max((len(w) for w in short), default=8)
+    fs = min(fs, int(zone / (longest * 0.62)))
 
     bg_css = (f"background:linear-gradient({tint},{tint}),url('{fond}') center/cover;"
               if fond else f"background:linear-gradient(135deg,#14060f,#3a1030);")
