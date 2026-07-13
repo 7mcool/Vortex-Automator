@@ -114,11 +114,58 @@ def _split_title(title: str) -> tuple[str, str]:
     return " ".join(words[:cut]), " ".join(words[cut:])
 
 
+def _alt_words(title: str, accent: str) -> str:
+    """Mots alternés BLANC/OR sur 2-3 lignes (style des covers de référence
+    d'Amessan que Michel veut reproduire)."""
+    words = [html_mod.escape(w) for w in title.replace(" #Shorts", "").strip().upper().split()[:12]]
+    out, line, lines = [], [], []
+    per_line = max(2, (len(words) + 2) // 3)
+    for i, w in enumerate(words):
+        color = accent if (i // 2) % 2 else "#ffffff"
+        line.append(f'<span style="color:{color}">{w}</span>')
+        if len(line) >= per_line:
+            lines.append(" ".join(line))
+            line = []
+    if line:
+        lines.append(" ".join(line))
+    return "<br>".join(lines[:3])
+
+
 def _html(cfg: Config, video_id: int, title: str, subject_uri: str, is_card: bool) -> str:
     bg, accent, glow = THEMES[video_id % len(THEMES)]
     line1, line2 = _split_title(title)
     line1, line2 = html_mod.escape(line1), html_mod.escape(line2)
     layout_b = video_id % 2 == 1  # photo à gauche / texte à droite, ou l'inverse
+
+    # Style « référence Amessan » : fond sombre ambiance, titre centré plein
+    # cadre en mots alternés blanc/or, petite photo du pasteur en bas à gauche.
+    if video_id % 3 != 2 or not subject_uri:
+        title_html = _alt_words(title, "#f2b632")
+        subject_img = (f'<img style="position:absolute;left:24px;bottom:0;height:46%;'
+                       f'filter:drop-shadow(0 0 24px rgba(0,0,0,.8));" src="{subject_uri}">'
+                       if subject_uri else "")
+        return f"""<!doctype html><html><head><meta charset="utf-8"><style>
+  * {{ margin:0; padding:0; box-sizing:border-box; }}
+  body {{ width:{W}px; height:{H}px; overflow:hidden; position:relative;
+         font-family:'Anton','Archivo Black','DejaVu Sans',sans-serif;
+         background:
+           radial-gradient(ellipse at 70% 30%, rgba(242,182,50,.16) 0%, transparent 55%),
+           linear-gradient(140deg,#0d0a06 0%,#221607 55%,#3a2408 100%); }}
+  .vig {{ position:absolute; inset:0;
+         background:radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.55) 100%); }}
+  h1 {{ position:absolute; left:6%; right:6%; top:50%; transform:translateY(-52%);
+       text-align:center; font-size:104px; line-height:1.18; letter-spacing:2px;
+       text-shadow:0 5px 0 rgba(0,0,0,.55),0 16px 34px rgba(0,0,0,.6); }}
+  .badge {{ position:absolute; bottom:30px; right:36px;
+           background:linear-gradient(180deg,#ffe27a,#f7b733); color:#1c1206;
+           font-size:30px; padding:10px 26px; border-radius:36px;
+           border:3px solid #fff; box-shadow:0 10px 24px rgba(0,0,0,.5); }}
+</style></head><body>
+  <div class="vig"></div>
+  {subject_img}
+  <h1>{title_html}</h1>
+  <div class="badge">{html_mod.escape(cfg.channel_name.upper())}</div>
+</body></html>"""
     logo_uri = ""
     logo_file = ASSETS_DIR / "logo-chaine.png"
     if logo_file.exists():

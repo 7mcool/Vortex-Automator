@@ -14,6 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 COPY requirements.txt .
+# PLAYWRIGHT_BROWSERS_PATH hors de /root/.cache (masqué par le volume cache)
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 RUN pip install --no-cache-dir -r requirements.txt yt-dlp pillow rembg onnxruntime \
         opencv-python-headless playwright \
     && playwright install --with-deps chromium
