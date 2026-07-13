@@ -7,10 +7,11 @@ Chaîne complète pour UNE vidéo longue :
    (phrase choc / enseignement / témoignage / message complet), en coupant
    UNIQUEMENT aux frontières de phrases — jamais de coupure brutale ;
 3. validation des bornes (calées sur les segments réels) ;
-4. découpe ffmpeg précise + recadrage VERTICAL 9:16 centré sur le visage ;
-5. les extraits sont déposés dans le dossier source du pipeline normal avec
-   leur .info.json (titre/description DeepSeek comme « légende ») : ils suivent
-   ensuite le circuit habituel (scan → SEO → habillage → publication).
+4. découpe ffmpeg précise en DEUX formats (décision de Michel) :
+   - HORIZONTAL 16:9 (max 1920x1080) → dossier source du pipeline normal
+     avec .info.json : circuit habituel vers la chaîne YouTube ;
+   - VERTICAL 9:16 recadré centré sur le visage → file d'attente TikTok
+     (/app/videos/tiktok_queue/), publiée dès l'approbation de l'API TikTok.
 """
 
 from __future__ import annotations
@@ -130,17 +131,8 @@ def _face_center_x(path: str, at: float, width: int, height: int) -> float:
     return 0.5
 
 
-def _cut_vertical(src: str, start: float, end: float, out: Path,
-                  src_w: int, src_h: int) -> bool:
-    """Découpe précise + recadrage 9:16 centré sur le visage."""
-    mid = (start + end) / 2
-    cx = _face_center_x(src, mid, src_w, src_h)
-    crop_w = int(src_h * 9 / 16 // 2 * 2)
-    if crop_w >= src_w:  # source déjà verticale/carrée : pas de recadrage
-        vf = "scale=1080:-2"
-    else:
-        x = int(max(0, min(src_w - crop_w, cx * src_w - crop_w / 2)))
-        vf = f"crop={crop_w}:{src_h}:{x}:0,scale=1080:1920"
+def _cut(src: str, start: float, end: float, out: Path, vf: str) -> bool:
+    """Découpe précise ré-encodée avec le filtre vidéo donné."""
     cmd = [find_ffmpeg(), "-v", "error", "-ss", f"{start:.2f}", "-to", f"{end:.2f}",
            "-i", src, "-vf", vf,
            "-c:v", "libx264", "-preset", "veryfast", "-crf", "21",
@@ -151,6 +143,27 @@ def _cut_vertical(src: str, start: float, end: float, out: Path,
     except subprocess.CalledProcessError as exc:
         log.error("Découpe échouée : %s", exc.stderr[-300:] if exc.stderr else exc)
         return False
+
+
+def _cut_horizontal(src: str, start: float, end: float, out: Path,
+                    src_w: int, src_h: int) -> bool:
+    """Version YouTube : format d'origine 16:9, plafonné à 1920 de large."""
+    vf = "scale=1920:-2:flags=lanczos" if src_w > 1920 else f"scale={src_w}:{src_h}"
+    return _cut(src, start, end, out, vf)
+
+
+def _cut_vertical(src: str, start: float, end: float, out: Path,
+                  src_w: int, src_h: int) -> bool:
+    """Version TikTok : recadrage 9:16 centré sur le visage."""
+    mid = (start + end) / 2
+    cx = _face_center_x(src, mid, src_w, src_h)
+    crop_w = int(src_h * 9 / 16 // 2 * 2)
+    if crop_w >= src_w:  # source déjà verticale/carrée : pas de recadrage
+        vf = "scale=1080:-2"
+    else:
+        x = int(max(0, min(src_w - crop_w, cx * src_w - crop_w / 2)))
+        vf = f"crop={crop_w}:{src_h}:{x}:0,scale=1080:1920"
+    return _cut(src, start, end, out, vf)
 
 
 def _probe_dims(path: str) -> tuple[int, int]:
@@ -201,18 +214,28 @@ def process_one_source(cfg: Config, db: Database) -> int:
 
     src_w, src_h = _probe_dims(str(src))
     chan = src.parent.name
+    tiktok_dir = Path("/app/videos/tiktok_queue")
+    tiktok_dir.mkdir(parents=True, exist_ok=True)
     made = 0
     for i, c in enumerate(clips, start=1):
-        out = cfg.source_dir / f"clip_{chan}_{src.stem[:24]}_{i}_{int(c['start'])}.mp4"
-        if not _cut_vertical(str(src), c["start"], c["end"], out, src_w, src_h):
-            continue
-        # légende pour le pipeline (le scanner lira ce .info.json)
+        stem = f"clip_{chan}_{src.stem[:24]}_{i}_{int(c['start'])}"
         info = {"description": f"{c['title']} — {c['hook']} {c['description']}"}
-        out.with_name(out.stem + ".info.json").write_text(
+        # 1) version HORIZONTALE → pipeline YouTube habituel
+        out_h = cfg.source_dir / f"{stem}.mp4"
+        if not _cut_horizontal(str(src), c["start"], c["end"], out_h, src_w, src_h):
+            continue
+        out_h.with_name(out_h.stem + ".info.json").write_text(
             json.dumps(info, ensure_ascii=False), encoding="utf-8")
+        # 2) version VERTICALE → file d'attente TikTok
+        out_v = tiktok_dir / f"{stem}_tiktok.mp4"
+        if _cut_vertical(str(src), c["start"], c["end"], out_v, src_w, src_h):
+            out_v.with_name(out_v.stem + ".info.json").write_text(json.dumps(
+                {"title": c["title"], "hook": c["hook"],
+                 "description": c["description"], "type": c["type"]},
+                ensure_ascii=False), encoding="utf-8")
         made += 1
-        log.info("Extrait %d/%d : %s (%ds, %s)", i, len(clips), out.name,
-                 int(c["end"] - c["start"]), c["type"])
+        log.info("Extrait %d/%d : %s (%ds, %s) + version TikTok", i, len(clips),
+                 out_h.name, int(c["end"] - c["start"]), c["type"])
     db.conn.execute("INSERT OR REPLACE INTO clip_sources VALUES (?, datetime('now'), ?)",
                     (str(src), made))
     db.conn.commit()

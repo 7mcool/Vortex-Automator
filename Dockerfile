@@ -16,8 +16,9 @@ WORKDIR /app
 COPY requirements.txt .
 # PLAYWRIGHT_BROWSERS_PATH hors de /root/.cache (masqué par le volume cache)
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
-RUN pip install --no-cache-dir -r requirements.txt yt-dlp pillow rembg onnxruntime \
+RUN pip install --no-cache-dir -r requirements.txt pillow rembg onnxruntime \
         opencv-python-headless playwright \
+    && pip install --no-cache-dir --upgrade yt-dlp bgutil-ytdlp-pot-provider \
     && playwright install --with-deps chromium
 
 COPY vortex/ vortex/

@@ -14,6 +14,7 @@ for C in $CHAINES; do
   mkdir -p "$DEST"
   echo "--- chaîne source : @$C ---"
   yt-dlp \
+    --extractor-args "youtubepot-bgutilhttp:base_url=http://bgutil-provider:4416" \
     --format "b" --format-sort "vcodec:h264,res:1080,br" --merge-output-format mp4 \
     --retries 10 --fragment-retries 10 --socket-timeout 30 \
     --download-archive "$DEST/.archive.txt" \
