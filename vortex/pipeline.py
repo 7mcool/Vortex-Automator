@@ -54,10 +54,14 @@ def plan_batch(cfg: Config, db: Database, count: int) -> list[dict]:
     """Associe les vidéos READY aux prochains créneaux libres (sans rien envoyer).
     Écarte (SKIPPED) les vidéos qui semblent déjà publiées sur la chaîne."""
     plan: list[dict] = []
-    candidates = db.by_state("READY", limit=count * 3 or 0)
+    candidates = db.by_state("READY", limit=count * 10 or 0)
     for row in candidates:
         if len(plan) >= count:
             break
+        if "render_path" in row.keys() and not row["render_path"]:
+            log.info("Reportée [%d] %s — pas encore habillée (rendu manquant)",
+                     row["id"], row["name"])
+            continue
         match = already_on_channel(db, row["title"] or "", row["caption"])
         if match:
             db.set_state(row["id"], "SKIPPED", f"déjà sur la chaîne : « {match} »")

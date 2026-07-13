@@ -18,8 +18,8 @@ python -m vortex retry
 python -m vortex detect-text -n 30
 python -m vortex transcribe -n 8
 python -m vortex prepare -n 10
-python -m vortex render -n 5
-python -m vortex thumbs -n 5
+python -m vortex render -n 8
+python -m vortex thumbs -n 8
 python -m vortex publish -n 5 --live
 python -m vortex engage
 python -m vortex status
