@@ -22,7 +22,7 @@ RUN pip install --no-cache-dir -r requirements.txt yt-dlp pillow rembg onnxrunti
 
 COPY vortex/ vortex/
 COPY assets/ assets/
-COPY vps/daily.sh vps/fetch_tiktok.sh vps/
+COPY vps/ vps/
 RUN chmod +x vps/*.sh
 
 # La config, les secrets et les données sont montés en volumes :
