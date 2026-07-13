@@ -114,24 +114,118 @@ def _split_title(title: str) -> tuple[str, str]:
     return " ".join(words[:cut]), " ".join(words[cut:])
 
 
-def _alt_words(title: str, accent: str) -> str:
-    """Mots alternés BLANC/OR sur 2-3 lignes (style des covers de référence
-    d'Amessan que Michel veut reproduire)."""
-    words = [html_mod.escape(w) for w in title.replace(" #Shorts", "").strip().upper().split()[:12]]
-    out, line, lines = [], [], []
-    per_line = max(2, (len(words) + 2) // 3)
-    for i, w in enumerate(words):
-        color = accent if (i // 2) % 2 else "#ffffff"
-        line.append(f'<span style="color:{color}">{w}</span>')
+IMPACT_WORDS = {"PAS", "JAMAIS", "ERREUR", "DANGER", "BLOQUE", "BLOQUES", "ATTENTION",
+                "STOP", "FAUX", "PIÈGE", "PIEGE", "PÉCHÉ", "PECHE", "MORT", "PERDU", "PERDUES"}
+
+
+def _short_words(title: str, max_words: int = 6) -> list[str]:
+    words = title.replace(" #Shorts", "").strip().upper().split()
+    if len(words) > max_words:
+        words = words[:max_words]
+        words[-1] = words[-1].rstrip(",;:-.") + "…"
+    return words
+
+
+def _impact_lines(title: str) -> str:
+    """Texte COURT en 2-3 lignes : lignes alternées BLANC/OR, mots d'impact en
+    ROUGE (style des références MrBeast-prédication de Michel)."""
+    words = [html_mod.escape(w) for w in _short_words(title)]
+    lines, line = [], []
+    per_line = 2 if len(words) <= 6 else 3
+    for w in words:
+        line.append(w)
         if len(line) >= per_line:
-            lines.append(" ".join(line))
+            lines.append(line)
             line = []
     if line:
-        lines.append(" ".join(line))
-    return "<br>".join(lines[:3])
+        lines.append(line)
+    out = []
+    for i, ln in enumerate(lines[:3]):
+        base = "#ffd23e" if i == 1 else "#ffffff"
+        spans = []
+        for w in ln:
+            color = "#ff2e2e" if w.rstrip("…!?.,") in IMPACT_WORDS else base
+            spans.append(f'<span style="color:{color}">{w}</span>')
+        out.append(" ".join(spans))
+    return "<br>".join(out)
+
+
+TINTS = [  # voile de couleur posé sur le fond photo (par vidéo)
+    "rgba(30,6,50,.72)",   # violet nuit
+    "rgba(5,10,40,.72)",   # bleu nuit
+    "rgba(40,4,10,.74)",   # rouge sombre
+    "rgba(20,14,2,.70)",   # brun doré
+    "rgba(8,8,10,.74)",    # noir
+]
+
+
+def _fond_uri(video_id: int) -> str:
+    fonds_dir = ASSETS_DIR / "fonds"
+    if not fonds_dir.is_dir():
+        return ""
+    fonds = sorted(p for p in fonds_dir.iterdir() if p.suffix.lower() in (".jpg", ".jpeg", ".png"))
+    if not fonds:
+        return ""
+    return _b64(fonds[video_id % len(fonds)].read_bytes(), "image/jpeg")
 
 
 def _html(cfg: Config, video_id: int, title: str, subject_uri: str, is_card: bool) -> str:
+    """Maquette v5 — reproduction des 7 références de Michel :
+    fond photo dramatique + voile coloré, PASTEUR PLEINE HAUTEUR,
+    texte COURT géant (blanc/or, mot d'impact rouge), trait doré,
+    nom du pasteur, logo de la chaîne, badge."""
+    tint = TINTS[video_id % len(TINTS)]
+    fond = _fond_uri(video_id)
+    left_side = video_id % 2 == 1  # pasteur à gauche ou à droite
+    logo_uri = ""
+    logo_file = ASSETS_DIR / "logo-chaine.png"
+    if logo_file.exists():
+        logo_uri = _b64(logo_file.read_bytes())
+    title_html = _impact_lines(title)
+    n_words = len(_short_words(title))
+    fs = 148 if n_words <= 4 else (124 if n_words <= 6 else 104)
+
+    bg_css = (f"background:linear-gradient({tint},{tint}),url('{fond}') center/cover;"
+              if fond else f"background:linear-gradient(135deg,#14060f,#3a1030);")
+    subj_html = ""
+    if subject_uri:
+        side = "left:-2%" if left_side else "right:-2%"
+        subj_html = (f'<img style="position:absolute;{side};bottom:-8px;height:103%;'
+                     f'filter:drop-shadow(0 0 30px rgba(0,0,0,.85)) '
+                     f'drop-shadow(0 0 60px rgba(255,255,255,.12));" src="{subject_uri}">')
+    txt_pos = ("left:42%;right:3%" if left_side else "left:4%;right:42%") if subject_uri \
+        else "left:8%;right:8%"
+
+    return f"""<!doctype html><html><head><meta charset="utf-8"><style>
+  * {{ margin:0; padding:0; box-sizing:border-box; }}
+  body {{ width:{W}px; height:{H}px; overflow:hidden; position:relative;
+         font-family:'Anton','Archivo Black','DejaVu Sans',sans-serif; {bg_css} }}
+  .vig {{ position:absolute; inset:0;
+         background:radial-gradient(ellipse at center, transparent 52%, rgba(0,0,0,.5) 100%); }}
+  .txt {{ position:absolute; top:47%; transform:translateY(-50%); {txt_pos};
+         text-align:center; }}
+  h1 {{ font-size:{fs}px; line-height:1.1; letter-spacing:2px;
+       text-shadow:0 4px 0 rgba(0,0,0,.6),0 14px 34px rgba(0,0,0,.75); }}
+  .trait {{ width:62%; height:12px; margin:26px auto 0;
+           background:linear-gradient(90deg,transparent,#f2b632,#ffd76a,#f2b632,transparent);
+           border-radius:8px; transform:skewX(-18deg); }}
+  .logo {{ position:absolute; top:24px; {'right:28px' if left_side else 'left:28px'};
+          width:96px; height:96px; border-radius:50%; border:4px solid #fff;
+          box-shadow:0 8px 20px rgba(0,0,0,.55); }}
+  .badge {{ position:absolute; bottom:26px; {'right:32px' if left_side else 'left:36px'};
+           background:linear-gradient(180deg,#ffe27a,#f7b733); color:#1c1206;
+           font-size:29px; padding:9px 24px; border-radius:34px;
+           border:3px solid #fff; box-shadow:0 10px 24px rgba(0,0,0,.5); }}
+</style></head><body>
+  <div class="vig"></div>
+  {subj_html}
+  <div class="txt"><h1>{title_html}</h1><div class="trait"></div></div>
+  {f'<img class="logo" src="{logo_uri}">' if logo_uri else ''}
+  <div class="badge">{html_mod.escape(cfg.channel_name.upper())}</div>
+</body></html>"""
+
+
+def _html_old(cfg: Config, video_id: int, title: str, subject_uri: str, is_card: bool) -> str:
     bg, accent, glow = THEMES[video_id % len(THEMES)]
     line1, line2 = _split_title(title)
     line1, line2 = html_mod.escape(line1), html_mod.escape(line2)
