@@ -14,7 +14,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt yt-dlp pillow rembg onnxruntime
+RUN pip install --no-cache-dir -r requirements.txt yt-dlp pillow rembg onnxruntime \
+        opencv-python-headless playwright \
+    && playwright install --with-deps chromium
 
 COPY vortex/ vortex/
 COPY assets/ assets/
