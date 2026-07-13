@@ -17,8 +17,8 @@ services:
       - ./data:/app/data
       - ./videos:/app/videos
       - ./cache:/root/.cache
-    mem_limit: 2g
-    cpus: 1.5
+    mem_limit: 4g
+    cpus: 2.0
 
   dashboard:
     image: vortex-automator:latest
