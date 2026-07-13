@@ -232,11 +232,12 @@ def thumbs_pending(cfg: Config, db: Database, limit: int = 0) -> int:
     if "thumb_path" not in cols:
         db.conn.execute("ALTER TABLE videos ADD COLUMN thumb_path TEXT")
         db.conn.commit()
-    # Les Shorts n'ont pas besoin de cover (le flux montre la vidéo) :
-    # on génère pour les vidéos longues.
+    # Covers pour TOUTES les vidéos, Shorts compris (décision de Michel :
+    # c'est la cover qui fait cliquer dans la recherche et sur la page chaîne).
     rows = db.conn.execute(
         "SELECT id FROM videos WHERE state = 'READY' AND thumb_path IS NULL "
-        "AND category != 'short' ORDER BY duration_s DESC").fetchall()
+        "ORDER BY CASE WHEN duration_s BETWEEN 30 AND 180 THEN 0 ELSE 1 END, "
+        "duration_s DESC").fetchall()
     done = 0
     for r in rows:
         if limit and done >= limit:
