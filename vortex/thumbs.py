@@ -131,8 +131,12 @@ def _html(cfg: Config, video_id: int, title: str, subject_uri: str, is_card: boo
         "box-shadow:0 0 40px {glow}aa,0 18px 34px rgba(0,0,0,.6);object-fit:cover;width:37%;"
     ).format(glow=glow)
     side_subject = "left:2.5%" if layout_b else "right:2.5%"
-    side_text = ("left:44%;right:4%;text-align:left" if layout_b
-                 else "left:5%;right:44%;text-align:left")
+    if subject_uri:
+        side_text = ("left:44%;right:4%;text-align:left" if layout_b
+                     else "left:5%;right:44%;text-align:left")
+    else:
+        # Cover typographique (orateur non identifié) : titre pleine largeur centré
+        side_text = "left:8%;right:8%;text-align:center"
 
     return f"""<!doctype html><html><head><meta charset="utf-8"><style>
   * {{ margin:0; padding:0; box-sizing:border-box; }}
@@ -189,32 +193,53 @@ def _render_html(html: str, out_jpg: Path) -> bool:
         return False
 
 
+def _slug(name: str) -> str:
+    import unicodedata
+    s = unicodedata.normalize("NFD", name.lower())
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    return "-".join(s.split())
+
+
+def _portrait_for(row, video_id: int) -> bytes | None:
+    """Photo de la bibliothèque, UNIQUEMENT si l'orateur est identifié
+    (règle de Michel : plus de détourage de nos vidéos — photos en ligne).
+    Le détourage des portraits est mis en cache."""
+    speaker = row["speaker"] if "speaker" in row.keys() and row["speaker"] else None
+    if not speaker:
+        return None
+    folder = ASSETS_DIR / "portraits" / _slug(speaker)
+    if not folder.is_dir():
+        return None
+    photos = sorted(p for p in folder.iterdir() if p.suffix.lower() in (".jpg", ".jpeg", ".png"))
+    if not photos:
+        return None
+    photo = photos[video_id % len(photos)]
+    cache = photo.with_suffix(photo.suffix + ".cut.png")
+    if cache.exists():
+        return cache.read_bytes()
+    cut = _cutout_png(photo.read_bytes())
+    try:
+        cache.write_bytes(cut)
+    except OSError:
+        pass
+    return cut
+
+
 def generate_thumb(cfg: Config, db: Database, video_id: int) -> bool:
     row = db.get(video_id)
     if row is None or not row["title"]:
-        return False
-    src = Path(row["path"])
-    if not src.exists():
         return False
 
     thumbs_dir = cfg.data_dir / "thumbs"
     thumbs_dir.mkdir(parents=True, exist_ok=True)
     out = thumbs_dir / f"{row['name']}.jpg"
 
-    frames = _extract_frames(str(src), row["duration_s"] or 30)
-    if not frames:
-        return False
-    best = _best_face_frame(frames)
-    subject_png = _cutout_png(best)
-    # heuristique : si le détourage a échoué on reçoit un PNG opaque -> carte
-    is_card = subject_png[:8] == frames[0][:8] if frames else False
-    from PIL import Image
-    probe_img = Image.open(io.BytesIO(subject_png))
-    is_card = probe_img.mode != "RGBA" or probe_img.getchannel("A").getextrema()[0] == 255
+    subject_png = _portrait_for(row, video_id)
+    subject_uri = _b64(subject_png) if subject_png else ""
 
     thumb_title = (row["thumb_title"] if "thumb_title" in row.keys() and row["thumb_title"]
                    else row["title"])
-    html = _html(cfg, video_id, thumb_title, _b64(subject_png), is_card)
+    html = _html(cfg, video_id, thumb_title, subject_uri, is_card=False)
     if not _render_html(html, out):
         return False
 

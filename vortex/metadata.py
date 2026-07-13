@@ -183,11 +183,14 @@ def prepare_video(cfg: Config, db: Database, video_id: int) -> bool:
         description = generated["description"]
         tags = generated["tags"]
         cols = [r[1] for r in db.conn.execute("PRAGMA table_info(videos)")]
-        if "thumb_title" not in cols:
-            db.conn.execute("ALTER TABLE videos ADD COLUMN thumb_title TEXT")
-            db.conn.commit()
+        for col in ("thumb_title", "speaker"):
+            if col not in cols:
+                db.conn.execute(f"ALTER TABLE videos ADD COLUMN {col} TEXT")
+                db.conn.commit()
         if generated.get("thumb_title"):
             db.update_fields(video_id, thumb_title=generated["thumb_title"])
+        if generated.get("speaker"):
+            db.update_fields(video_id, speaker=generated["speaker"])
     else:
         title = build_title(cfg, video_id, caption, transcript, is_short)
         description = build_description(cfg, caption, transcript, video_id)
