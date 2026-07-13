@@ -28,3 +28,8 @@ venv/
 Thumbs.db
 .vscode/
 .idea/
+
+# --- Gros fichiers locaux (VPS) ---
+videos/
+cache/
+assets/references-amessan/
