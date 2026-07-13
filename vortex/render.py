@@ -339,10 +339,11 @@ def render_video(cfg: Config, db: Database, video_id: int) -> bool:
 
     has_text = row["has_text"] if "has_text" in row.keys() else None
     src_w, src_h = row["width"] or 576, row["height"] or 1024
-    # Amélioration de qualité (« 1080p et plus ») : upscale vers la largeur cible
-    # + débruitage + netteté + contraste/saturation légèrement boostés.
-    target_w = getattr(cfg, "render_width", 1080)
-    out_w = target_w if src_w < target_w and src_h > src_w else src_w
+    # Qualité maximale : sortie 4K (verticale 2160x3840, horizontale 3840x2160).
+    # YouTube sert alors un codec bien meilleur (VP9/AV1) qu'en 1080p —
+    # c'est le principal levier de netteté perçue. Jamais de downscale.
+    target_w = int(getattr(cfg, "render_width", 0)) or (2160 if src_h > src_w else 3840)
+    out_w = max(src_w, target_w) // 2 * 2
     out_h = int(src_h * out_w / src_w) // 2 * 2
 
     ass_file = exports / f"{row['name']}.ass"
@@ -369,7 +370,7 @@ def render_video(cfg: Config, db: Database, video_id: int) -> bool:
            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
            "-c:a", "copy", "-movflags", "+faststart", "-y", str(out)]
     try:
-        subprocess.run(cmd, capture_output=True, timeout=1800, check=True)
+        subprocess.run(cmd, capture_output=True, timeout=7200, check=True)
     except subprocess.CalledProcessError as exc:
         log.error("Rendu échoué pour %s : %s", row["name"], exc.stderr[-400:] if exc.stderr else exc)
         return False

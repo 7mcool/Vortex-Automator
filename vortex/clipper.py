@@ -147,8 +147,8 @@ def _cut(src: str, start: float, end: float, out: Path, vf: str) -> bool:
 
 def _cut_horizontal(src: str, start: float, end: float, out: Path,
                     src_w: int, src_h: int) -> bool:
-    """Version YouTube : format d'origine 16:9, plafonné à 1920 de large."""
-    vf = "scale=1920:-2:flags=lanczos" if src_w > 1920 else f"scale={src_w}:{src_h}"
+    """Version YouTube : format d'origine 16:9, plafonné à 3840 de large (jamais de downscale)."""
+    vf = "scale=3840:-2:flags=lanczos" if src_w > 3840 else f"scale={src_w}:{src_h}"
     return _cut(src, start, end, out, vf)
 
 
