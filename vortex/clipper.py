@@ -54,11 +54,24 @@ Réponds UNIQUEMENT avec le JSON."""
 
 
 def _transcribe_timed(cfg: Config, path: str) -> tuple[list, float]:
-    from .transcribe import get_model
-    model = get_model(cfg)
+    # Modèle LÉGER dédié au repérage des extraits sur une source longue (jusqu'à
+    # 2 h) : sur un VPS avec peu de RAM libre, le modèle 'small' déclenche l'OOM.
+    # Cette transcription ne sert qu'à situer les bons passages — chaque extrait
+    # court est ensuite re-transcrit en 'small' au stade des sous-titres, donc la
+    # qualité finale n'est pas affectée. Surchargeable via cfg.clip_whisper_model.
+    from faster_whisper import WhisperModel
+    import gc
+    import os
+    model_name = getattr(cfg, "clip_whisper_model", None) or "base"
+    log.info("Transcription de repérage (modèle léger '%s')…", model_name)
+    model = WhisperModel(model_name, device=cfg.whisper_device,
+                         compute_type=cfg.whisper_compute,
+                         cpu_threads=os.cpu_count() or 2)
     segments_iter, info = model.transcribe(path, vad_filter=True)
     segs = [(round(s.start, 1), round(s.end, 1), s.text.strip())
             for s in segments_iter if s.text.strip()]
+    del model
+    gc.collect()
     return segs, info.duration
 
 
