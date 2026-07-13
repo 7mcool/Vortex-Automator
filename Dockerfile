@@ -21,6 +21,14 @@ RUN pip install --no-cache-dir -r requirements.txt pillow rembg onnxruntime \
     && pip install --no-cache-dir --upgrade yt-dlp bgutil-ytdlp-pot-provider \
     && playwright install --with-deps chromium
 
+# deno : moteur JavaScript requis par yt-dlp pour les défis anti-bot YouTube
+RUN apt-get update && apt-get install -y --no-install-recommends unzip \
+    && curl -fsSL -o /tmp/deno.zip \
+        https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip \
+    && unzip -q /tmp/deno.zip -d /usr/local/bin && rm /tmp/deno.zip \
+    && chmod +x /usr/local/bin/deno \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY vortex/ vortex/
 COPY assets/ assets/
 COPY vps/ vps/
