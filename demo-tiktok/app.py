@@ -115,7 +115,9 @@ class Handler(BaseHTTPRequestHandler):
                 f'<p class="ok">Connected as {STATE["user"]} &mdash; authorization granted.</p>'
                 '<form method="post" action="/publish">'
                 '<input type="text" name="title" value="La volonté de Dieu — extrait (démo)" maxlength="140">'
-                '<button class="btn" type="submit">Publish to TikTok</button></form>'))
+                '<button class="btn" type="submit" name="mode" value="direct">Direct Post to TikTok</button> '
+                '<button class="btn" type="submit" name="mode" value="inbox" style="background:#5b3fd4">Upload to TikTok drafts</button>'
+                '</form>'))
         else:
             self._send(_page('<p><a class="btn" href="/app">Open the app</a></p>'), 404)
 
@@ -126,12 +128,18 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         form = urllib.parse.parse_qs(self.rfile.read(length).decode())
         title = (form.get("title") or ["Sophos PropheTikos"])[0][:140]
-        res = _api("https://open.tiktokapis.com/v2/post/publish/video/init/", {
-            "post_info": {"title": title, "privacy_level": "SELF_ONLY",
-                          "disable_duet": False, "disable_comment": False,
-                          "disable_stitch": False},
-            "source_info": {"source": "PULL_FROM_URL", "video_url": VIDEO_URL},
-        }, token=STATE["token"])
+        mode = (form.get("mode") or ["direct"])[0]
+        if mode == "inbox":
+            res = _api("https://open.tiktokapis.com/v2/post/publish/inbox/video/init/", {
+                "source_info": {"source": "PULL_FROM_URL", "video_url": VIDEO_URL},
+            }, token=STATE["token"])
+        else:
+            res = _api("https://open.tiktokapis.com/v2/post/publish/video/init/", {
+                "post_info": {"title": title, "privacy_level": "SELF_ONLY",
+                              "disable_duet": False, "disable_comment": False,
+                              "disable_stitch": False},
+                "source_info": {"source": "PULL_FROM_URL", "video_url": VIDEO_URL},
+            }, token=STATE["token"])
         pid = res.get("data", {}).get("publish_id")
         if not pid:
             self._send(_page(f'<p class="err">Publish failed:</p><code>{json.dumps(res)[:400]}</code>'), 502)
@@ -139,8 +147,10 @@ class Handler(BaseHTTPRequestHandler):
         status = _api("https://open.tiktokapis.com/v2/post/publish/status/fetch/",
                       {"publish_id": pid}, token=STATE["token"])
         st = status.get("data", {}).get("status", "PROCESSING")
+        how = ("uploaded to the account's TikTok drafts (video.upload)" if mode == "inbox"
+               else "sent via Direct Post (video.publish)")
         self._send(_page(
-            f'<p class="ok">Video sent via Direct Post &#10003;</p>'
+            f'<p class="ok">Video {how} &#10003;</p>'
             f'<p>publish_id&nbsp;: <code>{pid}</code><br>status&nbsp;: <code>{st}</code></p>'
             '<p>TikTok is downloading and processing the video on the account.</p>'))
 
