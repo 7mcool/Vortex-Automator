@@ -25,8 +25,10 @@ def get_model(cfg: Config):
 
         log.info("Chargement du modèle Whisper '%s' (%s/%s)…",
                  cfg.whisper_model, cfg.whisper_device, cfg.whisper_compute)
+        import os
         _model = WhisperModel(cfg.whisper_model, device=cfg.whisper_device,
-                              compute_type=cfg.whisper_compute)
+                              compute_type=cfg.whisper_compute,
+                              cpu_threads=os.cpu_count() or 2)
     return _model
 
 

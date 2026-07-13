@@ -339,10 +339,12 @@ def render_video(cfg: Config, db: Database, video_id: int) -> bool:
 
     has_text = row["has_text"] if "has_text" in row.keys() else None
     src_w, src_h = row["width"] or 576, row["height"] or 1024
-    # Qualité maximale : sortie 4K (verticale 2160x3840, horizontale 3840x2160).
-    # YouTube sert alors un codec bien meilleur (VP9/AV1) qu'en 1080p —
-    # c'est le principal levier de netteté perçue. Jamais de downscale.
-    target_w = int(getattr(cfg, "render_width", 0)) or (2160 if src_h > src_w else 3840)
+    # Qualité maximale raisonnable : sortie 2K (verticale 1440x2560, horizontale
+    # 2560x1440). Dès 1440p, YouTube sert un codec bien meilleur (VP9/AV1) qu'en
+    # 1080p — c'est le principal levier de netteté perçue. La vraie 4K coûterait
+    # des heures d'encodage par vidéo sur un serveur 2 cœurs pour un gain marginal
+    # (surchargeable via cfg.render_width). Jamais de downscale.
+    target_w = int(getattr(cfg, "render_width", 0)) or (1440 if src_h > src_w else 2560)
     out_w = max(src_w, target_w) // 2 * 2
     out_h = int(src_h * out_w / src_w) // 2 * 2
 
