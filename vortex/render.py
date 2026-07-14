@@ -217,8 +217,8 @@ def build_ass(cfg: Config, *, width: int, height: int, duration: float,
     fs_handle = int(height / 32)
     margin_lr = int(width * 0.07)
     # Largeur maximale des lignes CALCULÉE (bold uppercase ≈ 0,62 × fontsize par caractère)
-    hook_chars = max(int(width * 0.86 / (fs_hook * 0.62)), 8)
-    kara_chars = max(int(width * 0.86 / (fs_kara * 0.62)), 6)
+    hook_chars = max(int(width * 0.90 / (fs_hook * 0.62)), 8)
+    kara_chars = max(int(width * 0.90 / (fs_kara * 0.62)), 6)
     hook_top = int(height * 0.16)
     # Sous-titres TOUJOURS bas (≈ 12 % du bas = zone caption standard, sous le
     # visage). Badges : haut = 7 % du haut (au-dessus du visage), bas = 11 %.
@@ -234,16 +234,26 @@ def build_ass(cfg: Config, *, width: int, height: int, duration: float,
 
     hook = title.replace(" #Shorts", "").strip().upper()
     words = hook.split()
-    if len(words) > 12:
-        words = words[:12]
+    if len(words) > 10:
+        words = words[:10]
     # Retire les fragments disgracieux en fin d'accroche (tirets, attributions coupées…)
     while words and (words[-1].strip("-–—|.…") == "" or words[-1].rstrip(".…") in ("EV", "ÉV", "PST", "PASTEUR")):
         words.pop()
     if len(hook.split()) > len(words):
         words[-1] = words[-1].rstrip(",;:-") + "…"
+    # Auto-ajustement (retour Michel 14/07) : l'accroche doit tenir en 3 LIGNES MAX
+    # et le texte s'ÉTIRE sur toute la largeur. On réduit la police juste assez
+    # pour que tout tienne en 3 lignes, sans jamais coller aux bords.
+    full_hook = " ".join(words)
+    longest = max((len(w) for w in words), default=8)
+    need_cpl = max((len(full_hook) + 2) // 3, longest)   # caractères/ligne visés
+    usable = width * 0.90
+    fs_hook = min(fs_hook, int(usable / (need_cpl * 0.62)))
+    fs_hook = max(fs_hook, int(height / 30))             # plancher lisible
+    hook_chars = max(int(usable / (fs_hook * 0.62)), longest)
     gold_txt = " ".join(words[:3])
     rest_txt = " ".join(words[3:])
-    hook_lines = list(_wrap(f"{gold_txt} {rest_txt}".strip(), hook_chars, 4))
+    hook_lines = list(_wrap(f"{gold_txt} {rest_txt}".strip(), hook_chars, 3))
     # Couleur : on passe au blanc dès que les mots dorés sont épuisés
     gold_chars = len(gold_txt)
     flat = " ".join(hook_lines)
