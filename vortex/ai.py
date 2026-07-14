@@ -108,8 +108,9 @@ def generate_metadata(channel: str, speakers: list[str], caption: str, transcrip
     payload = {
         "model": MODEL,
         "messages": [{"role": "user", "content": prompt}],
-        # le modèle raisonnement consomme des tokens en « réflexion »
-        "max_tokens": 4000 if reasoner else 900,
+        # v4-pro est plus bavard : marge large pour ne PAS tronquer le JSON SEO
+        # (sinon réponse incomplète → repli local et perte du bénéfice Pro).
+        "max_tokens": 4000 if reasoner else 2000,
     }
     if not reasoner:  # deepseek-reasoner ignore/rejette temperature + response_format
         payload["response_format"] = {"type": "json_object"}
