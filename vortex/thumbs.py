@@ -204,33 +204,43 @@ def _html(cfg: Config, video_id: int, title: str, subject_uri: str, is_card: boo
     subj_html = ""
     if subject_uri:
         side = "left:-2%" if left_side else "right:-2%"
-        subj_html = (f'<img style="position:absolute;{side};bottom:-8px;height:103%;'
+        subj_html = (f'<img style="position:absolute;{side};bottom:-8px;height:103%;z-index:2;'
                      f'filter:drop-shadow(0 0 30px rgba(0,0,0,.85)) '
-                     f'drop-shadow(0 0 60px rgba(255,255,255,.12));" src="{subject_uri}">')
+                     f'drop-shadow(0 0 60px rgba(255,255,255,.14)) saturate(1.12) contrast(1.05);" '
+                     f'src="{subject_uri}">')
     txt_pos = ("left:42%;right:3%" if left_side else "left:4%;right:42%") if subject_uri \
         else "left:8%;right:8%"
 
+    stroke = max(int(fs * 0.03), 3)
     return f"""<!doctype html><html><head><meta charset="utf-8"><style>
   * {{ margin:0; padding:0; box-sizing:border-box; }}
   body {{ width:{W}px; height:{H}px; overflow:hidden; position:relative;
-         font-family:'Anton','Archivo Black','DejaVu Sans',sans-serif; {bg_css} }}
-  .vig {{ position:absolute; inset:0;
-         background:radial-gradient(ellipse at center, transparent 52%, rgba(0,0,0,.5) 100%); }}
+         font-family:'Anton','Archivo Black','DejaVu Sans',sans-serif;
+         background:linear-gradient(135deg,#14060f,#3a1030); }}
+  .bg {{ position:absolute; inset:0; z-index:0; {bg_css}
+        filter:saturate(1.28) contrast(1.10) brightness(1.06); }}
+  .vig {{ position:absolute; inset:0; z-index:1;
+         background:radial-gradient(ellipse at 50% 44%, transparent 40%, rgba(0,0,0,.62) 100%),
+                    linear-gradient(0deg, rgba(0,0,0,.5), transparent 32%); }}
   .txt {{ position:absolute; top:47%; transform:translateY(-50%); {txt_pos};
-         text-align:center; }}
-  h1 {{ font-size:{fs}px; line-height:1.1; letter-spacing:2px;
-       text-shadow:0 4px 0 rgba(0,0,0,.6),0 14px 34px rgba(0,0,0,.75); }}
-  .trait {{ width:62%; height:12px; margin:26px auto 0;
-           background:linear-gradient(90deg,transparent,#f2b632,#ffd76a,#f2b632,transparent);
-           border-radius:8px; transform:skewX(-18deg); }}
+         text-align:center; z-index:3; }}
+  h1 {{ font-size:{fs}px; line-height:1.08; letter-spacing:2px; color:#fff;
+       -webkit-text-stroke:{stroke}px rgba(0,0,0,.92);
+       text-shadow:0 4px 0 rgba(0,0,0,.55),0 12px 30px rgba(0,0,0,.8),
+                   0 0 38px rgba(255,208,74,.38); }}
+  .trait {{ width:64%; height:13px; margin:26px auto 0;
+           background:linear-gradient(90deg,transparent,#ffcf3a,#fff0b0,#ffcf3a,transparent);
+           border-radius:8px; transform:skewX(-18deg);
+           box-shadow:0 0 26px rgba(255,207,58,.65); }}
   .logo {{ position:absolute; top:24px; {'right:28px' if left_side else 'left:28px'};
           width:96px; height:96px; border-radius:50%; border:4px solid #fff;
-          box-shadow:0 8px 20px rgba(0,0,0,.55); }}
+          box-shadow:0 8px 20px rgba(0,0,0,.55); z-index:4; }}
   .badge {{ position:absolute; bottom:26px; {'right:32px' if left_side else 'left:36px'};
-           background:linear-gradient(180deg,#ffe27a,#f7b733); color:#1c1206;
+           background:linear-gradient(180deg,#ffe27a,#f7b733); color:#1c1206; z-index:4;
            font-size:29px; padding:9px 24px; border-radius:34px;
            border:3px solid #fff; box-shadow:0 10px 24px rgba(0,0,0,.5); }}
 </style></head><body>
+  <div class="bg"></div>
   <div class="vig"></div>
   {subj_html}
   <div class="txt"><h1>{title_html}</h1><div class="trait"></div></div>

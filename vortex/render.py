@@ -29,6 +29,17 @@ log = logging.getLogger("vortex.render")
 
 WHITE = r"\c&HFFFFFF&"
 
+# Étalonnage CINÉMATIQUE (retour Michel 15/07 : « max qualité, éclaircir, netteté
+# GRAVE, plus que cinématique »). Ordre : débruitage léger → étalonnage (éclaircit
+# + contraste + couleurs punchy) → vibrance (sature les couleurs ternes sans cramer
+# les tons chair) → accentuation forte. Appliqué après le scale 2K.
+CINEMA_GRADE = (
+    "hqdn3d=1.2:1.2:5:5,"
+    "eq=contrast=1.13:brightness=0.03:saturation=1.16:gamma=0.95,"
+    "vibrance=intensity=0.25,"
+    "unsharp=5:5:1.0:5:5:0.4"
+)
+
 # ------------------------------------------------------------------ variété
 # Chaque vidéo tire son propre style (couleurs, police, textes) de façon
 # DÉTERMINISTE (seed = id) — demande de Michel : « toujours du nouveau,
@@ -202,7 +213,7 @@ def _karaoke_events(words_file: Path, duration: float, max_chars: int) -> list[s
 
 def build_ass(cfg: Config, *, width: int, height: int, duration: float,
               title: str, words_file: Path | None, skip_hook: bool = False,
-              lifted: bool = False, video_id: int = 0) -> str:
+              lifted: bool = False, video_id: int = 0, luminous: bool = True) -> str:
     v = _variant(video_id)
     fontname = v["font"] if not Path(r"C:\Windows\Fonts\arial.ttf").exists() else "Arial"
     accent = r"\c&H" + v["accent"] + "&"
@@ -263,10 +274,23 @@ def build_ass(cfg: Config, *, width: int, height: int, duration: float,
     fs_w = int(usable / (max(longest_line, 1) * 0.62))   # remplit la largeur
     fs_h = int(height / (7.3 * n_lines))                 # reste dans la bande haute
     fs_hook = max(int(height / 30), min(fs_w, fs_h))
-    # Accroche façon OpusClip : PILULE CLAIRE + texte FONCÉ (couleur portée par le
-    # style Hook). Les 3 premiers mots en accent chaud lisible sur fond clair.
-    hook_accent = r"\c&H1A24C8&"     # rouge chaud (BGR) — lisible sur pilule blanche
-    hook_ink = r"\c&H262626&"        # gris très foncé
+    # Deux styles d'accroche :
+    #  - LUMINEUX (défaut, retour Michel 15/07 « hooks lumineux et dynamiques ») :
+    #    texte BLANC éclatant, 3 premiers mots OR vif, HALO lumineux (couche floutée
+    #    derrière) + contour sombre fin pour rester lisible sur toute vidéo ;
+    #  - PILULE façon OpusClip : texte foncé sur pastille claire (option).
+    if luminous:
+        hook_accent = r"\c&H00D7FF&"   # or vif (BGR)
+        hook_ink = r"\c&HFFFFFF&"      # blanc éclatant
+        hook_style = (f"Style: Hook,{fontname},{fs_hook},&H00FFFFFF,&H00FFFFFF,"
+                      f"&H00202020,&H50000000,-1,-1,0,0,100,100,0.5,0,1,"
+                      f"{max(int(fs_hook * 0.09), 4)},2,8,{margin_lr},{margin_lr},{hook_top},1")
+    else:
+        hook_accent = r"\c&H1A24C8&"   # rouge chaud lisible sur pilule blanche
+        hook_ink = r"\c&H262626&"      # gris très foncé
+        hook_style = (f"Style: Hook,{fontname},{fs_hook},&H00262626,&H00262626,"
+                      f"&H0AF2F2F2,&H0AF2F2F2,-1,-1,0,0,100,100,0.5,0,3,"
+                      f"{hook_box},0,8,{margin_lr},{margin_lr},{hook_top},1")
     gold_chars = len(" ".join(words[:3]))
     hook_txt = "{" + hook_accent + "}"
     count = 0
@@ -285,6 +309,8 @@ def build_ass(cfg: Config, *, width: int, height: int, duration: float,
     # par N (MAISON→MAISO, AMEN→AME…, fréquent en majuscules françaises).
     if hook_txt.endswith(r"\N"):
         hook_txt = hook_txt[:-2]
+    # Version SANS couleur pour la couche de HALO lumineux (glow) derrière le texte.
+    hook_plain = r"\N".join(hook_lines)
 
     handle = "@sophos_prophetikos"
 
@@ -296,7 +322,7 @@ WrapStyle: 2
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Hook,{fontname},{fs_hook},&H00262626,&H00262626,&H0AF2F2F2,&H0AF2F2F2,-1,-1,0,0,100,100,0.5,0,3,{hook_box},0,8,{margin_lr},{margin_lr},{hook_top},1
+{hook_style}
 Style: Karaoke,{fontname},{fs_kara},&H00{v["kara"]},&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,1,0,1,5,3,2,{margin_lr},{margin_lr},{kara_bottom},1
 Style: BadgeBas,{fontname},{fs_badge},&H00FFFFFF,&H00FFFFFF,&H00{v["badge_bg"]},&H00{v["badge_bg"]},-1,0,0,0,100,100,1,0,3,{max(int(height/160), 8)},0,2,{margin_lr},{margin_lr},{badge_bottom},1
 Style: BadgeHaut,{fontname},{fs_badge},&H00FFFFFF,&H00FFFFFF,&H00{v["badge_bg"]},&H00{v["badge_bg"]},-1,0,0,0,100,100,1,0,3,{max(int(height/160), 8)},0,8,{margin_lr},{margin_lr},{badge_top},1
@@ -313,6 +339,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         # Accroche : 5 premières secondes seulement (elle recouvre la vidéo).
         # Supprimée quand la vidéo affiche déjà son message à l'écran
         # (retour de Michel : jamais deux fois le même message).
+        if luminous:
+            # Couche HALO derrière : gros contour OR flouté + remplissage transparent
+            # → un vrai glow lumineux. Texte net par-dessus (calque au-dessus).
+            g = max(int(fs_hook * 0.16), 6)
+            glow = (r"{\blur" + str(g) + r"\bord" + str(g) +
+                    r"\1a&HFF&\3c&H00D7FF&\4a&HFF&\shad0}")
+            events.append(
+                f"Dialogue: 0,{_ass_time(0.2)},{_ass_time(5.2)},Hook,,0,0,0,,{zoom_in}{glow}{hook_plain}")
         events.append(
             f"Dialogue: 1,{_ass_time(0.2)},{_ass_time(5.2)},Hook,,0,0,0,,{zoom_in}{hook_txt}")
     # CTA agressifs ÉPARPILLÉS : 6 fenêtres à des moments ET des positions
@@ -395,16 +429,14 @@ def render_video(cfg: Config, db: Database, video_id: int) -> bool:
     def _ffpath(p: str) -> str:
         return p.replace("\\", "/").replace(":", r"\:")
 
-    # Vidéo PLEIN ÉCRAN améliorée, textes par-dessus (pas de bandes)
+    # Vidéo PLEIN ÉCRAN, étalonnage CINÉMATIQUE + textes par-dessus (pas de bandes).
     vf = (
         f"scale={out_w}:{out_h}:flags=lanczos,"
-        f"hqdn3d=1.5:1.5:6:6,"
-        f"unsharp=5:5:0.7:5:5:0.3,"
-        f"eq=contrast=1.05:saturation=1.14:brightness=0.008,"
+        f"{CINEMA_GRADE},"
         f"ass='{_ffpath(str(ass_file))}'"
     )
     cmd = [find_ffmpeg(), "-v", "error", "-i", str(src), "-vf", vf,
-           "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+           "-c:v", "libx264", "-preset", "fast", "-crf", "18",
            "-c:a", "copy", "-movflags", "+faststart", "-y", str(out)]
     try:
         subprocess.run(cmd, capture_output=True, timeout=7200, check=True)
