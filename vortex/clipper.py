@@ -50,6 +50,19 @@ RÈGLES ABSOLUES :
 - pas de chevauchement entre extraits ; choisis les passages les PLUS forts ;
 - aucun extrait incompréhensible ou coupé brutalement.
 
+⛔ INTERDIT ABSOLU — n'extrais JAMAIS ces passages (ce sont des pièges qui ruinent la chaîne) :
+- appels aux DONS / OFFRANDES / dîmes, coordonnées de paiement, numéros Mobile Money
+  (Orange/MTN/Moov Money), IBAN, virements, Western Union, QR codes, « pour vos dons… » ;
+- annonces, informations pratiques, programme, intro/générique/outro, remerciements,
+  salutations, présentations de l'église ;
+- passages de LOUANGE / CHŒUR / chant sans enseignement.
+  → Ces segments existent dans presque toutes les vidéos d'église mais NE DOIVENT JAMAIS
+    devenir des extraits : hors-sujet, allure de spam/arnaque, réputation du ministère.
+- Ne garde QUE le véritable ENSEIGNEMENT biblique, l'EXHORTATION et les TÉMOIGNAGES.
+
+TITRES : accrocheurs MAIS fidèles au message spirituel réel (jamais transactionnels, jamais
+« envoyer de l'argent » ou « dons faciles »). Le titre doit refléter la vérité biblique enseignée.
+
 Réponds UNIQUEMENT avec le JSON."""
 
 
