@@ -34,10 +34,10 @@ WHITE = r"\c&HFFFFFF&"
 # + contraste + couleurs punchy) → vibrance (sature les couleurs ternes sans cramer
 # les tons chair) → accentuation forte. Appliqué après le scale 2K.
 CINEMA_GRADE = (
-    "hqdn3d=1.2:1.2:5:5,"
-    "eq=contrast=1.13:brightness=0.03:saturation=1.16:gamma=0.95,"
-    "vibrance=intensity=0.25,"
-    "unsharp=5:5:1.0:5:5:0.4"
+    "hqdn3d=1.5:1.5:6:6,"
+    "eq=contrast=1.20:brightness=0.05:saturation=1.24:gamma=0.90,"
+    "vibrance=intensity=0.38,"
+    "unsharp=7:7:1.5:7:7:0.5"
 )
 
 # ------------------------------------------------------------------ variété
@@ -45,13 +45,16 @@ CINEMA_GRADE = (
 # DÉTERMINISTE (seed = id) — demande de Michel : « toujours du nouveau,
 # police, couleurs, effets » (et YouTube pénalise l'uniformité de masse).
 
-ACCENTS = [  # hex ASS BBGGRR — accent accroche + mot karaoké
-    "00D7FF",  # or
-    "05FF2C",  # vert
-    "FFE500",  # cyan
-    "1C9FFF",  # orange
-    "B369FF",  # rose
-    "00E5FF",  # jaune
+ACCENTS = [  # hex ASS BBGGRR — accent accroche + mot karaoké. Palette VIBRANTE et
+             # VARIÉE (l'or n'est qu'une option parmi d'autres — retour Michel 15/07 :
+             # « tu es figé sur l'or, je ne t'impose rien »).
+    "FFF000",  # cyan électrique
+    "F020FF",  # magenta vif
+    "3CFF14",  # vert lime
+    "0AA5FF",  # orange vif
+    "FF8A0A",  # bleu électrique
+    "00D7FF",  # or (une option, pas LA règle)
+    "5050FF",  # rouge corail
 ]
 BADGE_COLORS = [  # fond du badge CTA (hex ASS BBGGRR)
     "1323E6",  # rouge YouTube
@@ -264,24 +267,28 @@ def build_ass(cfg: Config, *, width: int, height: int, duration: float,
     # L'accroche : bien visible, LARGE MAIS PAS TROP, jamais collée aux bords
     # (retour Michel 14/07). Largeur utile 0,84. Répartie sur 1 à 3 lignes, police
     # calée pour que la ligne la plus longue occupe ~0,84.
-    usable = width * 0.84
+    # OpusClip : le texte REMPLIT la largeur (≈0,88) — priorité au remplissage
+    # horizontal, la hauteur n'est qu'un plafond généreux (retour Michel 15/07 :
+    # « ni la bonne taille ni la bonne largeur, rappelle-toi d'OpusClip »).
+    usable = width * 0.88
     n = len(full_hook)
-    target_lines = 1 if n <= 15 else (2 if n <= 34 else 3)
+    # viser 2 lignes bien remplies (signature OpusClip) ; 3 seulement si très long
+    target_lines = 1 if n <= 11 else (2 if n <= 30 else 3)
     cpl = max((n + target_lines - 1) // target_lines, longest)
     hook_lines = list(_wrap(full_hook, cpl, 3))
     n_lines = max(1, len(hook_lines))
     longest_line = max((len(ln) for ln in hook_lines), default=cpl)
-    fs_w = int(usable / (max(longest_line, 1) * 0.62))   # remplit la largeur
-    fs_h = int(height / (7.3 * n_lines))                 # reste dans la bande haute
-    fs_hook = max(int(height / 30), min(fs_w, fs_h))
+    fs_fill = int(usable / (max(longest_line, 1) * 0.58))   # remplit la largeur
+    fs_cap_h = int(height * 0.34 / (n_lines * 1.14))        # plafond : bloc ≤ 34 % hauteur
+    fs_hook = max(int(height / 24), min(fs_fill, fs_cap_h))
     # Deux styles d'accroche :
     #  - LUMINEUX (défaut, retour Michel 15/07 « hooks lumineux et dynamiques ») :
     #    texte BLANC éclatant, 3 premiers mots OR vif, HALO lumineux (couche floutée
     #    derrière) + contour sombre fin pour rester lisible sur toute vidéo ;
     #  - PILULE façon OpusClip : texte foncé sur pastille claire (option).
     if luminous:
-        hook_accent = r"\c&H00D7FF&"   # or vif (BGR)
-        hook_ink = r"\c&HFFFFFF&"      # blanc éclatant
+        hook_accent = r"\c&H" + v["accent"] + "&"   # accent VARIÉ par vidéo (pas figé sur l'or)
+        hook_ink = r"\c&HFFFFFF&"                    # blanc éclatant
         hook_style = (f"Style: Hook,{fontname},{fs_hook},&H00FFFFFF,&H00FFFFFF,"
                       f"&H00202020,&H50000000,-1,-1,0,0,100,100,0.5,0,1,"
                       f"{max(int(fs_hook * 0.09), 4)},2,8,{margin_lr},{margin_lr},{hook_top},1")
@@ -344,7 +351,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             # → un vrai glow lumineux. Texte net par-dessus (calque au-dessus).
             g = max(int(fs_hook * 0.16), 6)
             glow = (r"{\blur" + str(g) + r"\bord" + str(g) +
-                    r"\1a&HFF&\3c&H00D7FF&\4a&HFF&\shad0}")
+                    r"\1a&HFF&\3c&H" + v["accent"] + r"&\4a&HFF&\shad0}")
             events.append(
                 f"Dialogue: 0,{_ass_time(0.2)},{_ass_time(5.2)},Hook,,0,0,0,,{zoom_in}{glow}{hook_plain}")
         events.append(

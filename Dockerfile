@@ -16,8 +16,10 @@ WORKDIR /app
 COPY requirements.txt .
 # PLAYWRIGHT_BROWSERS_PATH hors de /root/.cache (masqué par le volume cache)
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+# opencv ÉPINGLÉ en 4.x : la 5.x (alpha) a retiré CascadeClassifier + les données
+# haarcascade → la détection de visage des covers cassait silencieusement.
 RUN pip install --no-cache-dir -r requirements.txt pillow rembg onnxruntime \
-        opencv-python-headless playwright \
+        "opencv-python-headless==4.10.0.84" playwright \
     && pip install --no-cache-dir --upgrade yt-dlp bgutil-ytdlp-pot-provider \
     && playwright install --with-deps chromium
 

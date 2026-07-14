@@ -135,9 +135,9 @@ def _short_words(title: str, max_words: int = 6) -> list[str]:
     return words or ["MESSAGE", "PUISSANT"]
 
 
-def _impact_lines(title: str) -> str:
-    """Texte COURT en 2-3 lignes : lignes alternées BLANC/OR, mots d'impact en
-    ROUGE (style des références MrBeast-prédication de Michel)."""
+def _impact_lines(title: str, accent: str = "#ffd23e") -> str:
+    """Texte COURT en 2-3 lignes : lignes alternées BLANC / couleur d'ACCENT (variée
+    par vidéo), mots d'impact en ROUGE (style des références de Michel)."""
     words = [html_mod.escape(w) for w in _short_words(title)]
     lines, line = [], []
     per_line = 2 if len(words) <= 6 else 3
@@ -150,7 +150,7 @@ def _impact_lines(title: str) -> str:
         lines.append(line)
     out = []
     for i, ln in enumerate(lines[:3]):
-        base = "#ffd23e" if i == 1 else "#ffffff"
+        base = accent if i == 1 else "#ffffff"
         spans = []
         for w in ln:
             color = "#ff2e2e" if w.rstrip("…!?.,") in IMPACT_WORDS else base
@@ -165,6 +165,16 @@ TINTS = [  # voile de couleur posé sur le fond photo (par vidéo)
     "rgba(40,4,10,.74)",   # rouge sombre
     "rgba(20,14,2,.70)",   # brun doré
     "rgba(8,8,10,.74)",    # noir
+]
+
+COVER_ACCENTS = [  # (accent, halo r,g,b) — VARIÉS par vidéo (fini le tout-or)
+    ("#00e5ff", "0,229,255"),    # cyan
+    ("#ff3ea5", "255,62,165"),   # magenta
+    ("#5cff7a", "92,255,122"),   # vert
+    ("#ff8a2b", "255,138,43"),   # orange
+    ("#4d9dff", "77,157,255"),   # bleu
+    ("#ffd23e", "255,210,62"),   # or (une option)
+    ("#c05cff", "192,92,255"),   # violet
 ]
 
 
@@ -184,13 +194,14 @@ def _html(cfg: Config, video_id: int, title: str, subject_uri: str, is_card: boo
     texte COURT géant (blanc/or, mot d'impact rouge), trait doré,
     nom du pasteur, logo de la chaîne, badge."""
     tint = TINTS[video_id % len(TINTS)]
+    acc, rgb = COVER_ACCENTS[video_id % len(COVER_ACCENTS)]
     fond = _fond_uri(video_id)
     left_side = video_id % 2 == 1  # pasteur à gauche ou à droite
     logo_uri = ""
     logo_file = ASSETS_DIR / "logo-chaine.png"
     if logo_file.exists():
         logo_uri = _b64(logo_file.read_bytes())
-    title_html = _impact_lines(title)
+    title_html = _impact_lines(title, acc)
     short = _short_words(title)
     n_words = len(short)
     fs = 148 if n_words <= 4 else (124 if n_words <= 6 else 104)
@@ -227,18 +238,18 @@ def _html(cfg: Config, video_id: int, title: str, subject_uri: str, is_card: boo
   h1 {{ font-size:{fs}px; line-height:1.08; letter-spacing:2px; color:#fff;
        -webkit-text-stroke:{stroke}px rgba(0,0,0,.92);
        text-shadow:0 4px 0 rgba(0,0,0,.55),0 12px 30px rgba(0,0,0,.8),
-                   0 0 38px rgba(255,208,74,.38); }}
+                   0 0 40px rgba({rgb},.45); }}
   .trait {{ width:64%; height:13px; margin:26px auto 0;
-           background:linear-gradient(90deg,transparent,#ffcf3a,#fff0b0,#ffcf3a,transparent);
+           background:linear-gradient(90deg,transparent,{acc},#ffffff,{acc},transparent);
            border-radius:8px; transform:skewX(-18deg);
-           box-shadow:0 0 26px rgba(255,207,58,.65); }}
+           box-shadow:0 0 28px rgba({rgb},.7); }}
   .logo {{ position:absolute; top:24px; {'right:28px' if left_side else 'left:28px'};
           width:96px; height:96px; border-radius:50%; border:4px solid #fff;
           box-shadow:0 8px 20px rgba(0,0,0,.55); z-index:4; }}
   .badge {{ position:absolute; bottom:26px; {'right:32px' if left_side else 'left:36px'};
-           background:linear-gradient(180deg,#ffe27a,#f7b733); color:#1c1206; z-index:4;
+           background:{acc}; color:#0a0a12; z-index:4; font-weight:bold;
            font-size:29px; padding:9px 24px; border-radius:34px;
-           border:3px solid #fff; box-shadow:0 10px 24px rgba(0,0,0,.5); }}
+           border:3px solid #fff; box-shadow:0 10px 24px rgba(0,0,0,.5),0 0 22px rgba({rgb},.5); }}
 </style></head><body>
   <div class="bg"></div>
   <div class="vig"></div>
