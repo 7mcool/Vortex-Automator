@@ -261,6 +261,55 @@ def _cut(src: str, start: float, end: float, out: Path, vf: str) -> bool:
         return False
 
 
+def _speech_intervals(segs: list, start: float, end: float,
+                      max_gap: float = 0.7, pad: float = 0.12) -> list[tuple]:
+    """À partir des segments de parole, renvoie les intervalles à GARDER dans
+    [start,end] en supprimant les silences > max_gap (coupe le « trop de silence »).
+    Fusionne les segments proches ; borne le résultat à [start,end]."""
+    spans = [(max(start, s), min(end, e)) for s, e, _ in segs
+             if e > start and s < end]
+    spans.sort()
+    if not spans:
+        return [(start, end)]
+    merged: list[list] = [list(spans[0])]
+    for s, e in spans[1:]:
+        if s - merged[-1][1] <= max_gap:
+            merged[-1][1] = max(merged[-1][1], e)   # petit silence : on garde tout
+        else:
+            merged.append([s, e])                    # gros silence : on coupe
+    out = []
+    for i, (s, e) in enumerate(merged):
+        a = max(start, s - (pad if i else 0))
+        b = min(end, e + pad)
+        if b - a > 0.3:
+            out.append((round(a, 2), round(b, 2)))
+    return out or [(start, end)]
+
+
+def _cut_montage(src: str, intervals: list[tuple], out: Path, vf_per: str) -> bool:
+    """MONTAGE : ré-assemble uniquement les intervalles de parole (silences coupés),
+    avec un filtre vidéo par morceau (vf_per). Garde la synchro audio/vidéo."""
+    parts_v, parts_a, n = [], [], len(intervals)
+    fc = []
+    for i, (a, b) in enumerate(intervals):
+        fc.append(f"[0:v]trim={a}:{b},setpts=PTS-STARTPTS,{vf_per}[v{i}]")
+        fc.append(f"[0:a]atrim={a}:{b},asetpts=PTS-STARTPTS[a{i}]")
+        parts_v.append(f"[v{i}]")
+        parts_a.append(f"[a{i}]")
+    fc.append("".join(f"{parts_v[i]}{parts_a[i]}" for i in range(n))
+              + f"concat=n={n}:v=1:a=1[outv][outa]")
+    cmd = [find_ffmpeg(), "-v", "error", "-i", src,
+           "-filter_complex", ";".join(fc), "-map", "[outv]", "-map", "[outa]",
+           "-c:v", "libx264", "-preset", "veryfast", "-crf", "21",
+           "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", "-y", str(out)]
+    try:
+        subprocess.run(cmd, capture_output=True, timeout=5400, check=True)
+        return out.exists()
+    except subprocess.CalledProcessError as exc:
+        log.error("Montage échoué : %s", exc.stderr[-300:] if exc.stderr else exc)
+        return False
+
+
 def _cut_horizontal(src: str, start: float, end: float, out: Path,
                     src_w: int, src_h: int) -> bool:
     """Version YouTube : format d'origine 16:9, plafonné à 3840 de large (jamais de downscale)."""
