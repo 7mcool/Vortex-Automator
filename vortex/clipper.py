@@ -257,15 +257,68 @@ def _cut_horizontal(src: str, start: float, end: float, out: Path,
     return _cut(src, start, end, out, vf)
 
 
+def _smooth(vals: list[float], k: int = 2) -> list[float]:
+    """Moyenne glissante (lissage du panoramique)."""
+    out = []
+    n = len(vals)
+    for i in range(n):
+        lo, hi = max(0, i - k), min(n, i + k + 1)
+        out.append(sum(vals[lo:hi]) / (hi - lo))
+    return out
+
+
+def _track_x_expr(src: str, start: float, end: float, src_w: int, src_h: int,
+                  crop_w: int) -> str | None:
+    """RECADRAGE DYNAMIQUE (façon OpusClip) : échantillonne la position du visage
+    tout au long de l'extrait, lisse, et renvoie une expression ffmpeg pour un
+    crop.x qui SUIT le prédicateur en douceur (interpolation linéaire par
+    morceaux). Renvoie None si le suivi n'est pas exploitable (→ crop statique)."""
+    dur = end - start
+    step = 1.6                       # un échantillon toutes ~1,6 s
+    n = max(2, min(int(dur / step) + 1, 40))  # borne le nombre d'échantillons
+    times = [dur * i / (n - 1) for i in range(n)]
+    max_x = float(src_w - crop_w)
+    xs: list[float] = []
+    last = 0.5
+    for t in times:
+        cx = _face_center_x(src, start + t, src_w, src_h)
+        if cx <= 0 or cx >= 1:       # visage non détecté → garde la dernière position
+            cx = last
+        last = cx
+        xs.append(max(0.0, min(max_x, cx * src_w - crop_w / 2)))
+    xs = _smooth(xs, k=2)
+    kf = [(round(times[i], 2), int(round(xs[i]))) for i in range(n)]
+    # supprime les points quasi identiques consécutifs (expression plus courte)
+    trimmed = [kf[0]]
+    for t, x in kf[1:]:
+        if abs(x - trimmed[-1][1]) >= 3 or t == kf[-1][0]:
+            trimmed.append((t, x))
+    if len(trimmed) < 2:
+        return None
+    # expression x(t) : interpolation linéaire par morceaux (t relatif au clip)
+    expr = str(trimmed[-1][1])
+    for i in range(len(trimmed) - 2, -1, -1):
+        t0, x0 = trimmed[i]
+        t1, x1 = trimmed[i + 1]
+        dt = (t1 - t0) or 0.001
+        seg = f"({x0}+({x1 - x0})*(t-{t0})/{dt})"
+        # virgules NON échappées : la valeur est protégée par des guillemets simples
+        # dans le filtre (x='...'), donc les virgules y sont littérales.
+        expr = f"if(lt(t,{t1}),{seg},{expr})"
+    return expr
+
+
 def _cut_vertical(src: str, start: float, end: float, out: Path,
                   src_w: int, src_h: int) -> bool:
-    """Version TikTok : recadrage 9:16 centré sur le visage."""
-    mid = (start + end) / 2
-    cx = _face_center_x(src, mid, src_w, src_h)
+    """Version TikTok/Short : recadrage 9:16 avec SUIVI DYNAMIQUE du visage."""
     crop_w = int(src_h * 9 / 16 // 2 * 2)
     if crop_w >= src_w:  # source déjà verticale/carrée : pas de recadrage
-        vf = "scale=1080:-2"
-    else:
+        return _cut(src, start, end, out, "scale=1080:-2")
+    expr = _track_x_expr(src, start, end, src_w, src_h, crop_w)
+    if expr:
+        vf = f"crop={crop_w}:{src_h}:x='{expr}':y=0,scale=1080:1920"
+    else:  # repli : crop statique centré sur le visage au milieu
+        cx = _face_center_x(src, (start + end) / 2, src_w, src_h)
         x = int(max(0, min(src_w - crop_w, cx * src_w - crop_w / 2)))
         vf = f"crop={crop_w}:{src_h}:{x}:0,scale=1080:1920"
     return _cut(src, start, end, out, vf)

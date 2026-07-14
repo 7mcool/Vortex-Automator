@@ -257,20 +257,19 @@ def build_ass(cfg: Config, *, width: int, height: int, duration: float,
     fs_hook = min(fs_hook, int(usable / (need_cpl * 0.62)))
     fs_hook = max(fs_hook, int(height / 30))             # plancher lisible
     hook_chars = max(int(usable / (fs_hook * 0.62)), longest)
-    gold_txt = " ".join(words[:3])
-    rest_txt = " ".join(words[3:])
-    hook_lines = list(_wrap(f"{gold_txt} {rest_txt}".strip(), hook_chars, 3))
-    # Couleur : on passe au blanc dès que les mots dorés sont épuisés
-    gold_chars = len(gold_txt)
-    flat = " ".join(hook_lines)
-    hook_txt = ""
+    hook_lines = list(_wrap(full_hook, hook_chars, 3))
+    # Accroche façon OpusClip : PILULE CLAIRE + texte FONCÉ (couleur portée par le
+    # style Hook). Les 3 premiers mots en accent chaud lisible sur fond clair.
+    hook_accent = r"\c&H1A24C8&"     # rouge chaud (BGR) — lisible sur pilule blanche
+    hook_ink = r"\c&H262626&"        # gris très foncé
+    gold_chars = len(" ".join(words[:3]))
+    hook_txt = "{" + hook_accent + "}"
     count = 0
-    hook_txt += "{" + accent + "}"
     switched = False
     for line in hook_lines:
         for ch in line:
             if not switched and count >= gold_chars:
-                hook_txt += "{" + WHITE + "}"
+                hook_txt += "{" + hook_ink + "}"
                 switched = True
             hook_txt += ch
             count += 1
@@ -288,7 +287,7 @@ WrapStyle: 2
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Hook,{fontname},{fs_hook},&H00FFFFFF,&H00FFFFFF,&H5A000000,&H5A000000,-1,-1,0,0,100,100,0.5,0,3,{hook_box},0,8,{margin_lr},{margin_lr},{hook_top},1
+Style: Hook,{fontname},{fs_hook},&H00262626,&H00262626,&H0AF2F2F2,&H0AF2F2F2,-1,-1,0,0,100,100,0.5,0,3,{hook_box},0,8,{margin_lr},{margin_lr},{hook_top},1
 Style: Karaoke,{fontname},{fs_kara},&H00{v["kara"]},&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,1,0,1,5,3,2,{margin_lr},{margin_lr},{kara_bottom},1
 Style: BadgeBas,{fontname},{fs_badge},&H00FFFFFF,&H00FFFFFF,&H00{v["badge_bg"]},&H00{v["badge_bg"]},-1,0,0,0,100,100,1,0,3,{max(int(height/160), 8)},0,2,{margin_lr},{margin_lr},{badge_bottom},1
 Style: BadgeHaut,{fontname},{fs_badge},&H00FFFFFF,&H00FFFFFF,&H00{v["badge_bg"]},&H00{v["badge_bg"]},-1,0,0,0,100,100,1,0,3,{max(int(height/160), 8)},0,8,{margin_lr},{margin_lr},{badge_top},1
