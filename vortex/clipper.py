@@ -384,16 +384,32 @@ def process_one_source(cfg: Config, db: Database) -> int:
             continue
         out_h.with_name(out_h.stem + ".info.json").write_text(
             json.dumps(info, ensure_ascii=False), encoding="utf-8")
-        # 2) version VERTICALE → file d'attente TikTok
+        # 2) version VERTICALE (suivi dynamique du visage) → file d'attente TikTok
         out_v = tiktok_dir / f"{stem}_tiktok.mp4"
-        if _cut_vertical(str(src), c["start"], c["end"], out_v, src_w, src_h):
+        clip_len = c["end"] - c["start"]
+        vert_ok = _cut_vertical(str(src), c["start"], c["end"], out_v, src_w, src_h)
+        if vert_ok:
             out_v.with_name(out_v.stem + ".info.json").write_text(json.dumps(
                 {"title": c["title"], "hook": c["hook"],
                  "description": c["description"], "type": c["type"]},
                 ensure_ascii=False), encoding="utf-8")
+            # 2b) le vertical part AUSSI en YouTube SHORT si ≤ 180 s (décision Michel :
+            #     vertical = YouTube Short + TikTok ; horizontal = YouTube classique).
+            if clip_len <= 180:
+                short_stem = f"{stem}_short"
+                out_s = cfg.source_dir / f"{short_stem}.mp4"
+                try:
+                    out_s.write_bytes(out_v.read_bytes())
+                    out_s.with_name(short_stem + ".info.json").write_text(
+                        json.dumps({"description": f"{c['title']} — {c['hook']} "
+                                    f"{c['description']}", "format": "short"},
+                                   ensure_ascii=False), encoding="utf-8")
+                except OSError as exc:
+                    log.warning("Copie Short échouée : %s", exc)
         made += 1
-        log.info("Extrait %d/%d : %s (%ds, %s) + version TikTok", i, len(clips),
-                 out_h.name, int(c["end"] - c["start"]), c["type"])
+        log.info("Extrait %d/%d : %s (%ds, %s) + vertical%s", i, len(clips),
+                 out_h.name, int(clip_len), c["type"],
+                 " + Short YouTube" if (vert_ok and clip_len <= 180) else "")
     db.conn.execute("INSERT OR REPLACE INTO clip_sources VALUES (?, datetime('now'), ?)",
                     (str(src), made))
     db.conn.commit()
