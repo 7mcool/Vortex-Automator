@@ -20,10 +20,11 @@ import urllib.request
 log = logging.getLogger("vortex.ai")
 
 API_URL = "https://api.deepseek.com/chat/completions"
-# Modèle « Pro » raisonnement (deepseek-reasoner / R1) pour la qualité du SEO
-# (retour Michel 14/07 : utiliser la version Pro, pas le modèle rapide).
-# Surchargeable via DEEPSEEK_MODEL.
-MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-reasoner")
+# Modèle « Pro » (deepseek-v4-pro) pour la qualité du SEO — retour Michel 14/07 :
+# utiliser la version Pro, pas le rapide. Vérifié : l'API n'expose que deux modèles,
+# deepseek-v4-flash (rapide) et deepseek-v4-pro ; « deepseek-chat/reasoner » retombent
+# sur le flash. Surchargeable via DEEPSEEK_MODEL.
+MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-pro")
 
 
 def _parse_json_obj(content: str) -> dict:

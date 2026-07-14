@@ -172,7 +172,7 @@ def _ask_clips(cfg: Config, segs: list, duration: float) -> list[dict]:
     if len(transcript) > 90000:  # ~2 h de sermon max par appel
         transcript = transcript[:90000]
     max_clips = 8 if duration > 1200 else 5
-    model = os.environ.get("DEEPSEEK_MODEL", "deepseek-reasoner")
+    model = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-pro")
     reasoner = "reasoner" in model
     payload = {
         "model": model,
