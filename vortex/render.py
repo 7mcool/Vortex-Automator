@@ -250,14 +250,19 @@ def build_ass(cfg: Config, *, width: int, height: int, duration: float,
     # pour que tout tienne en 3 lignes, sans jamais coller aux bords.
     full_hook = " ".join(words)
     longest = max((len(w) for w in words), default=8)
-    need_cpl = max((len(full_hook) + 2) // 3, longest)   # caractères/ligne visés
-    # largeur utile 0,84 (marge de sécurité) : le texte s'étire intelligemment
-    # mais ne touche JAMAIS les bords (retour Michel 14/07)
-    usable = width * 0.84
-    fs_hook = min(fs_hook, int(usable / (need_cpl * 0.62)))
-    fs_hook = max(fs_hook, int(height / 30))             # plancher lisible
-    hook_chars = max(int(usable / (fs_hook * 0.62)), longest)
-    hook_lines = list(_wrap(full_hook, hook_chars, 3))
+    # L'accroche doit REMPLIR la largeur (retour Michel 14/07 : « étirer plus »)
+    # sans toucher les bords → largeur utile 0,88. On répartit sur 1 à 3 lignes,
+    # puis on choisit la police pour que la ligne la plus longue occupe ~0,88.
+    usable = width * 0.88
+    n = len(full_hook)
+    target_lines = 1 if n <= 15 else (2 if n <= 34 else 3)
+    cpl = max((n + target_lines - 1) // target_lines, longest)
+    hook_lines = list(_wrap(full_hook, cpl, 3))
+    n_lines = max(1, len(hook_lines))
+    longest_line = max((len(ln) for ln in hook_lines), default=cpl)
+    fs_w = int(usable / (max(longest_line, 1) * 0.62))   # remplit la largeur
+    fs_h = int(height / (7.3 * n_lines))                 # reste dans la bande haute
+    fs_hook = max(int(height / 30), min(fs_w, fs_h))
     # Accroche façon OpusClip : PILULE CLAIRE + texte FONCÉ (couleur portée par le
     # style Hook). Les 3 premiers mots en accent chaud lisible sur fond clair.
     hook_accent = r"\c&H1A24C8&"     # rouge chaud (BGR) — lisible sur pilule blanche
