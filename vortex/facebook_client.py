@@ -98,7 +98,9 @@ def media_url(cfg: Config, filename: str) -> str:
     exige une URL vidéo publiquement téléchargeable par les serveurs Meta."""
     base = (getattr(cfg, "media_base_url", "") or "http://187.127.235.148:8787").rstrip("/")
     tok = os.environ.get("MEDIA_TOKEN", "") or os.environ.get("DASHBOARD_TOKEN", "")
-    return f"{base}/media/{tok}/{filename}"
+    # quote : les noms de clips ont des accents/espaces → URL valide (le dashboard
+    # fait le unquote symétrique côté serveur).
+    return f"{base}/media/{tok}/{urllib.parse.quote(filename)}"
 
 
 def _ig_business_id(cfg: Config, token: str) -> str | None:

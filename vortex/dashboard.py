@@ -14,6 +14,7 @@ import os
 import re
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import unquote
 
 from .config import load_config
 from .db import Database
@@ -102,7 +103,9 @@ class Handler(BaseHTTPRequestHandler):
         prefix = f"/media/{mt}/"
         if not mt or not self.path.startswith(prefix):
             return False
-        name = os.path.basename(self.path[len(prefix):].split("?")[0])
+        # Décoder les %XX de l'URL : les noms de clips contiennent des accents
+        # (é → %C3%A9) et Meta encode le chemin en récupérant la vidéo.
+        name = os.path.basename(unquote(self.path[len(prefix):].split("?")[0]))
         try:
             cfg = load_config()
             base = (cfg.data_dir / "exports").resolve()
