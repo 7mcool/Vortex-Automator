@@ -207,23 +207,26 @@ def build_ass(cfg: Config, *, width: int, height: int, duration: float,
     fontname = v["font"] if not Path(r"C:\Windows\Fonts\arial.ttf").exists() else "Arial"
     accent = r"\c&H" + v["accent"] + "&"
 
-    # Tailles et marges relatives à la vidéo — textes RAPPROCHÉS DU CENTRE
-    # (retour de Michel : plus visibles, jamais collés aux bords)
-    fs_hook = int(height / 18)
-    fs_kara = int(height / 15)
-    fs_badge = int(height / 20)
-    fs_handle = int(height / 30)
+    # Tailles et marges relatives à la vidéo. Retour de Michel (14/07) :
+    # sous-titres PLUS PETITS et JAMAIS sur le visage. Le visage occupe la zone
+    # centrale/haute — donc : sous-titres dans le tiers BAS (zone sûre), boutons
+    # du haut remontés TOUT EN HAUT (au-dessus du visage), boutons du bas en bas.
+    fs_hook = int(height / 20)
+    fs_kara = int(height / 22)
+    fs_badge = int(height / 26)
+    fs_handle = int(height / 32)
     margin_lr = int(width * 0.07)
     # Largeur maximale des lignes CALCULÉE (bold uppercase ≈ 0,62 × fontsize par caractère)
     hook_chars = max(int(width * 0.86 / (fs_hook * 0.62)), 8)
     kara_chars = max(int(width * 0.86 / (fs_kara * 0.62)), 6)
-    hook_top = int(height * 0.18)
-    # Anti-superposition : si la vidéo a déjà ses textes incrustés (souvent au
-    # centre), nos captions descendent et le badge bas passe sous elles.
-    kara_bottom = int(height * (0.20 if lifted else 0.34))
-    badge_bottom = int(height * (0.08 if lifted else 0.18))
-    badge_top = int(height * 0.26)     # variante haute des badges
-    handle_top = int(height * 0.06)
+    hook_top = int(height * 0.16)
+    # Sous-titres TOUJOURS bas (≈ 12 % du bas = zone caption standard, sous le
+    # visage). Badges : haut = 7 % du haut (au-dessus du visage), bas = 11 %.
+    kara_bottom = int(height * 0.12)
+    badge_bottom = int(height * 0.11)
+    badge_top = int(height * 0.07)     # variante haute des badges — AU-DESSUS du visage
+    handle_top = int(height * 0.035)
+    hook_box = max(int(height / 110), 10)  # padding du fond semi-transparent DERRIÈRE L'ACCROCHE (hook)
 
     def badge_fs(text: str) -> int:
         """Taille auto-ajustée pour qu'un badge ne déborde JAMAIS."""
@@ -269,7 +272,7 @@ WrapStyle: 2
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Hook,{fontname},{fs_hook},&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,-1,-1,0,0,100,100,0.5,0,1,4,2,8,{margin_lr},{margin_lr},{hook_top},1
+Style: Hook,{fontname},{fs_hook},&H00FFFFFF,&H00FFFFFF,&H5A000000,&H5A000000,-1,-1,0,0,100,100,0.5,0,3,{hook_box},0,8,{margin_lr},{margin_lr},{hook_top},1
 Style: Karaoke,{fontname},{fs_kara},&H00{v["kara"]},&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,1,0,1,5,3,2,{margin_lr},{margin_lr},{kara_bottom},1
 Style: BadgeBas,{fontname},{fs_badge},&H00FFFFFF,&H00FFFFFF,&H00{v["badge_bg"]},&H00{v["badge_bg"]},-1,0,0,0,100,100,1,0,3,{max(int(height/160), 8)},0,2,{margin_lr},{margin_lr},{badge_bottom},1
 Style: BadgeHaut,{fontname},{fs_badge},&H00FFFFFF,&H00FFFFFF,&H00{v["badge_bg"]},&H00{v["badge_bg"]},-1,0,0,0,100,100,1,0,3,{max(int(height/160), 8)},0,8,{margin_lr},{margin_lr},{badge_top},1
@@ -313,7 +316,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     if words_file and words_file.exists():
         if v["caption_mode"] == "pop":
-            events += _pop_events(words_file, duration, fs_pop=int(height / 10))
+            events += _pop_events(words_file, duration, fs_pop=int(height / 15))
         elif v["caption_mode"] == "build":
             events += _build_events(words_file, duration, kara_chars, v["kara"])
         else:
