@@ -31,6 +31,16 @@ log = logging.getLogger("vortex.clipper")
 
 SOURCES_DIR = Path("/app/videos/sources")
 
+# Chaîne source → pasteur habituel (ministères d'UN SEUL pasteur, confirmés par
+# Michel). Utilisé comme indice pour la cover (photo HD) ET vérifié par l'IA :
+# si la vidéo montre clairement un invité, l'IA laisse le speaker vide.
+CHANNEL_PASTORS = {
+    "lamaisondesagesse": "Jacques Amessan",
+    "EgliseGénérationDaniel": "Aimé Bodjiyé",
+    "ÉgliseVasesdHonneur": "Mohammed Sanogo",
+    "VasesdHonneur": "Mohammed Sanogo",
+}
+
 CLIP_PROMPT = """Tu es monteur pour une chaîne YouTube/TikTok de prédications chrétiennes francophones.
 Voici la transcription HORODATÉE (en secondes) d'une longue vidéo ({duration:.0f} s au total) :
 
@@ -374,10 +384,13 @@ def process_one_source(cfg: Config, db: Database) -> int:
     chan = src.parent.name
     tiktok_dir = Path("/app/videos/tiktok_queue")
     tiktok_dir.mkdir(parents=True, exist_ok=True)
+    pastor = CHANNEL_PASTORS.get(chan, "")
     made = 0
     for i, c in enumerate(clips, start=1):
         stem = f"clip_{chan}_{src.stem[:24]}_{i}_{int(c['start'])}"
-        info = {"description": f"{c['title']} — {c['hook']} {c['description']}"}
+        # Indice pasteur dans la légende (l'IA nomme si cohérent, sinon écarte l'invité)
+        prefix = f"Prédication de {pastor}. " if pastor else ""
+        info = {"description": f"{prefix}{c['title']} — {c['hook']} {c['description']}"}
         # 1) version HORIZONTALE → pipeline YouTube habituel
         out_h = cfg.source_dir / f"{stem}.mp4"
         if not _cut_horizontal(str(src), c["start"], c["end"], out_h, src_w, src_h):
@@ -401,7 +414,7 @@ def process_one_source(cfg: Config, db: Database) -> int:
                 try:
                     out_s.write_bytes(out_v.read_bytes())
                     out_s.with_name(short_stem + ".info.json").write_text(
-                        json.dumps({"description": f"{c['title']} — {c['hook']} "
+                        json.dumps({"description": f"{prefix}{c['title']} — {c['hook']} "
                                     f"{c['description']}", "format": "short"},
                                    ensure_ascii=False), encoding="utf-8")
                 except OSError as exc:

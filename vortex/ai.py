@@ -53,6 +53,10 @@ PROMPT = """Tu es l'éditeur YouTube de la chaîne « {channel} », dédiée aux
 ATTENTION — ORATEUR : les vidéos montrent différents prédicateurs (souvent l'un de : {speakers}). \
 N'attribue un nom à la prédication QUE si l'orateur est clairement identifiable dans la légende \
 ou la transcription (il se nomme, ou la légende le nomme). {speaker_hint}\
+VÉRIFICATION : si la légende indique « Prédication de X » (le pasteur habituel de la chaîne source), \
+renseigne "speaker" avec ce nom — SAUF si la transcription montre CLAIREMENT un AUTRE orateur ou un \
+invité (on présente quelqu'un d'autre, une femme parle alors que X est un homme, etc.) : dans ce cas \
+laisse "speaker" vide. \
 En cas de doute, n'emploie AUCUN nom propre : dis « le pasteur » ou « ce serviteur de Dieu ».
 
 Voici les données d'une vidéo verticale de {duration:.0f} secondes :
