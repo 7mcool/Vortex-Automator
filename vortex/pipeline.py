@@ -233,6 +233,22 @@ def execute_plan(cfg: Config, db: Database, plan: list[dict], live: bool) -> Non
             except Exception as exc:
                 log.warning("Facebook : publication ignorée (%s)", exc)
 
+        # Aimant Instagram : Reel du même clip vertical. L'API Reels exige une URL
+        # publique → on sert le clip habillé (data/exports) via la route /media du
+        # dashboard. On n'essaie donc QUE si le rendu existe (l'original sur le
+        # disque source n'est pas servi publiquement).
+        rendered = "render_path" in keys and row["render_path"] and Path(row["render_path"]).exists()
+        if cfg.instagram_publish and fb_selected and fb_vertical and rendered:
+            try:
+                from . import facebook_client
+                if facebook_client.available(cfg):
+                    ig_url = facebook_client.media_url(cfg, Path(row["render_path"]).name)
+                    ig_id = facebook_client.post_reel_to_instagram(cfg, ig_url, row["title"] or "")
+                    if ig_id:
+                        log.info("Instagram : Reel publié (%s) pour %s", ig_id, row["name"])
+            except Exception as exc:
+                log.warning("Instagram : publication ignorée (%s)", exc)
+
 
 def retry_failed(db: Database) -> int:
     """Remet les FAILED dans le circuit, à l'étape où ils avaient échoué."""

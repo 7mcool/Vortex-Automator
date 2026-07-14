@@ -52,6 +52,10 @@ class Config:
     # Désactivé par défaut (éviter de reposter tout le backlog d'un coup) ; activer
     # via config.toml [publish] facebook_publish = true quand prêt.
     facebook_publish: bool = False
+    # Aimant Instagram : republier chaque clip vertical en Reel (API Graph, token
+    # de Page partagé avec Facebook). Nécessite le compte IG relié à la Page et le
+    # droit instagram_content_publish. Activer via [publish] instagram_publish = true.
+    instagram_publish: bool = False
     fb_page_id: str = "1203021176235142"
     # Base publique pour servir les clips à l'API Reels Instagram (dashboard :8787).
     media_base_url: str = "http://187.127.235.148:8787"
@@ -131,6 +135,7 @@ def load_config(config_file: Path | None = None) -> Config:
         playlist_id=publish.get("playlist_id", ""),
         upload_captions=bool(publish.get("upload_captions", False)),
         facebook_publish=bool(publish.get("facebook_publish", False)),
+        instagram_publish=bool(publish.get("instagram_publish", False)),
         fb_page_id=str(publish.get("fb_page_id", "1203021176235142")),
         media_base_url=str(publish.get("media_base_url", "http://187.127.235.148:8787")),
         whisper_model=whisper.get("model", "small"),
