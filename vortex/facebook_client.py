@@ -230,13 +230,41 @@ def post_story_to_facebook(cfg: Config, video_path: str) -> str | None:
         return None
 
 
+def _story_ready_clip(cfg: Config, video_path: str, max_s: int = 58) -> str:
+    """Une Story IG est limitée à 60 s (erreur 2207082 au-delà). Si le clip est plus
+    long, on produit un extrait des premières max_s s dans data/exports (servi
+    publiquement). Retourne le chemin utilisable pour la Story."""
+    from .textdetect import find_ffmpeg
+    ff = find_ffmpeg()
+    try:
+        dur = float(subprocess.run(
+            [ff.replace("ffmpeg", "ffprobe"), "-v", "quiet", "-show_entries",
+             "format=duration", "-of", "csv=p=0", video_path],
+            capture_output=True, text=True, timeout=60).stdout.strip() or 0)
+    except Exception:
+        dur = 0
+    if dur and dur <= max_s + 1:
+        return video_path
+    out = Path(cfg.data_dir) / "exports" / f"story_{Path(video_path).stem}.mp4"
+    cmd = [ff, "-v", "error", "-i", video_path, "-t", str(max_s),
+           "-c", "copy", "-movflags", "+faststart", "-y", str(out)]
+    try:
+        subprocess.run(cmd, capture_output=True, timeout=300, check=True)
+        return str(out) if out.exists() else video_path
+    except Exception as exc:
+        log.warning("Story : découpe ≤%ds échouée (%s) — clip original", max_s, exc)
+        return video_path
+
+
 def post_story_both(cfg: Config, video_path: str) -> dict:
     """Story du jour sur Instagram ET Facebook (rappel quotidien vers YouTube).
-    Le clip doit être dans data/exports (servi publiquement pour Instagram)."""
-    ig_url = media_url(cfg, Path(video_path).name)
+    Le clip doit être dans data/exports (servi publiquement pour Instagram) ; il est
+    ramené à ≤ 58 s au besoin (contrainte Story Instagram)."""
+    story_path = _story_ready_clip(cfg, video_path)
+    ig_url = media_url(cfg, Path(story_path).name)
     return {
         "instagram": post_story_to_instagram(cfg, ig_url),
-        "facebook": post_story_to_facebook(cfg, video_path),
+        "facebook": post_story_to_facebook(cfg, story_path),
     }
 
 
