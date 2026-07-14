@@ -211,7 +211,7 @@ def build_ass(cfg: Config, *, width: int, height: int, duration: float,
     # sous-titres PLUS PETITS et JAMAIS sur le visage. Le visage occupe la zone
     # centrale/haute — donc : sous-titres dans le tiers BAS (zone sûre), boutons
     # du haut remontés TOUT EN HAUT (au-dessus du visage), boutons du bas en bas.
-    fs_hook = int(height / 20)
+    fs_hook = int(height / 22)
     fs_kara = int(height / 22)
     fs_badge = int(height / 26)
     fs_handle = int(height / 32)
@@ -219,7 +219,11 @@ def build_ass(cfg: Config, *, width: int, height: int, duration: float,
     # Largeur maximale des lignes CALCULÉE (bold uppercase ≈ 0,62 × fontsize par caractère)
     hook_chars = max(int(width * 0.84 / (fs_hook * 0.62)), 8)
     kara_chars = max(int(width * 0.84 / (fs_kara * 0.62)), 6)
-    hook_top = int(height * 0.16)
+    # Accroche ANCRÉE EN HAUT (bande au-dessus du visage). Avec 3 lignes max
+    # partant de 5,5 %, elle se termine vers ~22 % — au-dessus du visage du
+    # prédicateur (centré plus bas), donc l'accroche ET son encadré ne le
+    # couvrent jamais (retour Michel 14/07).
+    hook_top = int(height * 0.055)
     # Sous-titres TOUJOURS bas (≈ 12 % du bas = zone caption standard, sous le
     # visage). Badges : haut = 7 % du haut (au-dessus du visage), bas = 11 %.
     kara_bottom = int(height * 0.12)
