@@ -250,10 +250,10 @@ def build_ass(cfg: Config, *, width: int, height: int, duration: float,
     # pour que tout tienne en 3 lignes, sans jamais coller aux bords.
     full_hook = " ".join(words)
     longest = max((len(w) for w in words), default=8)
-    # L'accroche doit REMPLIR la largeur (retour Michel 14/07 : « étirer plus »)
-    # sans toucher les bords → largeur utile 0,88. On répartit sur 1 à 3 lignes,
-    # puis on choisit la police pour que la ligne la plus longue occupe ~0,88.
-    usable = width * 0.88
+    # L'accroche : bien visible, LARGE MAIS PAS TROP, jamais collée aux bords
+    # (retour Michel 14/07). Largeur utile 0,84. Répartie sur 1 à 3 lignes, police
+    # calée pour que la ligne la plus longue occupe ~0,84.
+    usable = width * 0.84
     n = len(full_hook)
     target_lines = 1 if n <= 15 else (2 if n <= 34 else 3)
     cpl = max((n + target_lines - 1) // target_lines, longest)
@@ -371,10 +371,18 @@ def render_video(cfg: Config, db: Database, video_id: int) -> bool:
     out_w = max(src_w, target_w) // 2 * 2
     out_h = int(src_h * out_w / src_w) // 2 * 2
 
+    # Accroche à l'écran = phrase CHOC courte (thumb_title, 4-6 mots) façon OpusClip,
+    # PAS le titre YouTube long/descriptif (retour Michel 14/07 : « le texte est bad »).
+    hook_text = ""
+    if "thumb_title" in row.keys() and row["thumb_title"]:
+        hook_text = row["thumb_title"]
+    if not hook_text:
+        hook_text = row["title"] or ""
+
     ass_file = exports / f"{row['name']}.ass"
     ass_file.write_text(
         build_ass(cfg, width=out_w, height=out_h,
-                  duration=duration, title=row["title"] or "",
+                  duration=duration, title=hook_text,
                   words_file=words_file if words_file.exists() else None,
                   skip_hook=(has_text == "texte"),
                   lifted=(has_text in ("texte", "douteux")), video_id=video_id),
