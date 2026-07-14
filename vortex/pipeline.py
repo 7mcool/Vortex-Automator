@@ -213,6 +213,19 @@ def execute_plan(cfg: Config, db: Database, plan: list[dict], live: bool) -> Non
         log.info("OK %s -> https://youtu.be/%s (publication %s)",
                  row["name"], youtube_id, publish_at)
 
+        # Aimant vers YouTube : republier les clips VERTICAUX sur la Page Facebook
+        # avec un CTA « Sermon complet 👉 YouTube ». Derrière l'interrupteur
+        # facebook_publish (voir config) pour ne pas reposter tout le backlog.
+        if cfg.facebook_publish and ("tiktok" in row["name"] or "_short" in row["name"]):
+            try:
+                from . import facebook_client
+                if facebook_client.available(cfg):
+                    fb_id = facebook_client.post_video_to_page(cfg, upload_path, row["title"] or "")
+                    if fb_id:
+                        log.info("Facebook : clip publié (post %s) pour %s", fb_id, row["name"])
+            except Exception as exc:
+                log.warning("Facebook : publication ignorée (%s)", exc)
+
 
 def retry_failed(db: Database) -> int:
     """Remet les FAILED dans le circuit, à l'étape où ils avaient échoué."""

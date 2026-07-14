@@ -48,6 +48,11 @@ class Config:
     notify_subscribers: bool = True
     playlist_id: str = ""
     upload_captions: bool = False  # 400 unités de quota/vidéo — désactivé pour tenir 5/jour
+    # Aimant Facebook : republier chaque clip vertical sur la Page FB (lien YouTube).
+    # Désactivé par défaut (éviter de reposter tout le backlog d'un coup) ; activer
+    # via config.toml [publish] facebook_publish = true quand prêt.
+    facebook_publish: bool = False
+    fb_page_id: str = "1203021176235142"
 
     # Transcription
     whisper_model: str = "small"
@@ -123,6 +128,8 @@ def load_config(config_file: Path | None = None) -> Config:
         notify_subscribers=bool(publish.get("notify_subscribers", True)),
         playlist_id=publish.get("playlist_id", ""),
         upload_captions=bool(publish.get("upload_captions", False)),
+        facebook_publish=bool(publish.get("facebook_publish", False)),
+        fb_page_id=str(publish.get("fb_page_id", "1203021176235142")),
         whisper_model=whisper.get("model", "small"),
         whisper_device=whisper.get("device", "cpu"),
         whisper_compute=whisper.get("compute_type", "int8"),
