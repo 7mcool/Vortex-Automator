@@ -105,12 +105,16 @@ def generate_metadata(channel: str, speakers: list[str], caption: str, transcrip
         transcript=(transcript or "(vide)")[:6000],
     )
     reasoner = "reasoner" in MODEL
+    # v4-pro EST un modèle de raisonnement : il consomme des reasoning_tokens
+    # (mesuré : 1300-1800 tokens de réflexion AVANT la sortie) sur le budget
+    # max_tokens. Avec 2000, la réflexion épuise le budget et le JSON SEO est
+    # tronqué → « réponse incomplète » → repli local. On donne donc un gros
+    # budget à tout modèle « pro »/« reasoner » (réflexion + sortie confortables).
+    big_budget = reasoner or "pro" in MODEL
     payload = {
         "model": MODEL,
         "messages": [{"role": "user", "content": prompt}],
-        # v4-pro est plus bavard : marge large pour ne PAS tronquer le JSON SEO
-        # (sinon réponse incomplète → repli local et perte du bénéfice Pro).
-        "max_tokens": 4000 if reasoner else 2000,
+        "max_tokens": 6000 if big_budget else 2000,
     }
     if not reasoner:  # deepseek-reasoner ignore/rejette temperature + response_format
         payload["response_format"] = {"type": "json_object"}
@@ -123,7 +127,7 @@ def generate_metadata(channel: str, speakers: list[str], caption: str, transcrip
                 API_URL, data=body,
                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
             )
-            with urllib.request.urlopen(req, timeout=180 if reasoner else 90) as r:
+            with urllib.request.urlopen(req, timeout=180 if big_budget else 90) as r:
                 resp = json.load(r)
             data = _parse_json_obj(resp["choices"][0]["message"]["content"])
             title = str(data.get("title", "")).strip()

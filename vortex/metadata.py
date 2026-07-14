@@ -100,6 +100,35 @@ def build_title(cfg: Config, video_id: int, caption: str, transcript: str, is_sh
     return title[:100]  # limite dure de l'API YouTube
 
 
+def derive_thumb_title(title: str, hook: str = "") -> str:
+    """Phrase choc COURTE (4-6 mots) pour l'accroche à l'écran façon OpusClip,
+    dérivée localement quand l'IA n'en fournit pas. Le hook affiché ne doit
+    JAMAIS être le titre long (retour Michel : « le texte de l'extrait 1 est bad »)."""
+    base = (hook or title or "").strip()
+    # retire une amorce du type « À méditer : » / « Écoute bien : »
+    if ":" in base:
+        head, tail = base.split(":", 1)
+        if len(head) <= 14 and tail.strip():
+            base = tail.strip()
+    # coupe à la 1re ponctuation forte (garde une clause nette)
+    for sep in ("!", "?", ".", ":", ";", "—", ",", "-"):
+        i = base.find(sep)
+        if 12 <= i <= 42:
+            base = base[:i]
+            break
+    base = re.sub(r"\s+", " ", base).strip(" .,-—:;#")
+    words = base.split()
+    if len(words) > 6:
+        words = words[:6]
+    # évite de finir sur un mot de liaison (« … ET LES »)
+    _trailing = {"et", "de", "des", "du", "la", "le", "les", "un", "une", "à",
+                 "en", "ce", "qui", "que", "d", "l", "au", "aux", "ou", "ni", "pour"}
+    while len(words) > 2 and words[-1].lower().strip("'") in _trailing:
+        words.pop()
+    base = " ".join(words)[:42].strip()
+    return base.upper() if base else ""
+
+
 def build_description(cfg: Config, caption: str, transcript: str, video_id: int) -> str:
     hook = clean_caption(caption, cfg.known_speakers) or first_sentences(transcript, 160)
     excerpt = first_sentences(transcript, 400)
@@ -187,14 +216,23 @@ def prepare_video(cfg: Config, db: Database, video_id: int) -> bool:
             if col not in cols:
                 db.conn.execute(f"ALTER TABLE videos ADD COLUMN {col} TEXT")
                 db.conn.commit()
-        if generated.get("thumb_title"):
-            db.update_fields(video_id, thumb_title=generated["thumb_title"])
+        thumb = generated.get("thumb_title") or derive_thumb_title(title, generated.get("hook", ""))
+        if thumb:
+            db.update_fields(video_id, thumb_title=thumb)
         if generated.get("speaker"):
             db.update_fields(video_id, speaker=generated["speaker"])
     else:
         title = build_title(cfg, video_id, caption, transcript, is_short)
         description = build_description(cfg, caption, transcript, video_id)
         tags = build_tags(cfg, caption, transcript)
+        # Repli local : garantir une accroche courte (jamais le titre long à l'écran)
+        thumb = derive_thumb_title(title, clean_caption(caption, cfg.known_speakers))
+        cols = [r[1] for r in db.conn.execute("PRAGMA table_info(videos)")]
+        if "thumb_title" not in cols:
+            db.conn.execute("ALTER TABLE videos ADD COLUMN thumb_title TEXT")
+            db.conn.commit()
+        if thumb:
+            db.update_fields(video_id, thumb_title=thumb)
 
     db.set_state(
         video_id, "READY", f"métadonnées générées ({source})",

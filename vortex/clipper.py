@@ -184,13 +184,14 @@ def _ask_clips(cfg: Config, segs: list, duration: float) -> list[dict]:
     max_clips = 8 if duration > 1200 else 5
     model = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-pro")
     reasoner = "reasoner" in model
+    # v4-pro raisonne (reasoning_tokens ~1500-2000 avant la sortie) : gros budget
+    # obligatoire sinon la réflexion épuise max_tokens et le JSON est tronqué → 0 extrait.
+    big_budget = reasoner or "pro" in model
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": CLIP_PROMPT.format(
             duration=duration, transcript=transcript, max_clips=max_clips)}],
-        # marge large : v4-pro est bavard et 8 extraits en JSON = beaucoup de tokens
-        # (sinon JSON tronqué → 0 extrait).
-        "max_tokens": 8000 if reasoner else 5000,
+        "max_tokens": 8000 if big_budget else 5000,
     }
     if not reasoner:  # deepseek-reasoner ignore/rejette temperature + response_format
         payload["response_format"] = {"type": "json_object"}
