@@ -11,6 +11,7 @@ from __future__ import annotations
 import html
 import json
 import os
+import re
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -82,8 +83,73 @@ def build_page() -> str:
         db.close()
 
 
+def _media_token() -> str:
+    # Jeton d'URL pour servir les clips à Meta (Reels IG) — non devinable.
+    return os.environ.get("MEDIA_TOKEN", "") or os.environ.get("DASHBOARD_TOKEN", "")
+
+
 class Handler(BaseHTTPRequestHandler):
+    def do_HEAD(self):  # noqa: N802
+        if not self._serve_media(head=True):
+            self.send_response(404)
+            self.end_headers()
+
+    def _serve_media(self, head: bool) -> bool:
+        """Sert un clip depuis data/exports pour l'API Reels Instagram (URL publique).
+        Chemin : /media/<MEDIA_TOKEN>/<fichier.mp4>. Protégé contre la traversée,
+        supporte les requêtes Range (206) car Meta télécharge la vidéo par plages."""
+        mt = _media_token()
+        prefix = f"/media/{mt}/"
+        if not mt or not self.path.startswith(prefix):
+            return False
+        name = os.path.basename(self.path[len(prefix):].split("?")[0])
+        try:
+            cfg = load_config()
+            base = (cfg.data_dir / "exports").resolve()
+            fpath = (base / name).resolve()
+            if base != fpath.parent or not fpath.is_file():
+                self.send_response(404); self.end_headers(); return True
+        except Exception:
+            self.send_response(404); self.end_headers(); return True
+        size = fpath.stat().st_size
+        ctype = "video/mp4" if name.lower().endswith(".mp4") else "application/octet-stream"
+        start, end, status = 0, size - 1, 200
+        rng = self.headers.get("Range")
+        if rng:
+            m = re.match(r"bytes=(\d+)-(\d*)", rng.strip())
+            if m:
+                start = int(m.group(1))
+                end = int(m.group(2)) if m.group(2) else size - 1
+                end = min(end, size - 1)
+                if start > end:
+                    self.send_response(416); self.end_headers(); return True
+                status = 206
+        length = end - start + 1
+        self.send_response(status)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(length))
+        self.send_header("Accept-Ranges", "bytes")
+        if status == 206:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        self.end_headers()
+        if not head:
+            try:
+                with open(fpath, "rb") as f:
+                    f.seek(start)
+                    remaining = length
+                    while remaining > 0:
+                        chunk = f.read(min(262144, remaining))
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                        remaining -= len(chunk)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+        return True
+
     def do_GET(self):  # noqa: N802
+        if self._serve_media(head=False):
+            return
         token = os.environ.get("DASHBOARD_TOKEN", "")
         if not token or self.path.strip("/") not in (token, f"{token}/api"):
             self.send_response(404)

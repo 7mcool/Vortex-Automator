@@ -280,7 +280,11 @@ def build_ass(cfg: Config, *, width: int, height: int, duration: float,
             count += 1
         hook_txt += r"\N"
         count += 1
-    hook_txt = hook_txt.rstrip(r"\N")
+    # Retire le saut de ligne ASS final (r"\N") — surtout PAS rstrip(r"\N") qui
+    # traite \N comme l'ensemble {'\\','N'} et mangerait un dernier mot finissant
+    # par N (MAISON→MAISO, AMEN→AME…, fréquent en majuscules françaises).
+    if hook_txt.endswith(r"\N"):
+        hook_txt = hook_txt[:-2]
 
     handle = "@sophos_prophetikos"
 

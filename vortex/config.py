@@ -53,6 +53,8 @@ class Config:
     # via config.toml [publish] facebook_publish = true quand prêt.
     facebook_publish: bool = False
     fb_page_id: str = "1203021176235142"
+    # Base publique pour servir les clips à l'API Reels Instagram (dashboard :8787).
+    media_base_url: str = "http://187.127.235.148:8787"
 
     # Transcription
     whisper_model: str = "small"
@@ -130,6 +132,7 @@ def load_config(config_file: Path | None = None) -> Config:
         upload_captions=bool(publish.get("upload_captions", False)),
         facebook_publish=bool(publish.get("facebook_publish", False)),
         fb_page_id=str(publish.get("fb_page_id", "1203021176235142")),
+        media_base_url=str(publish.get("media_base_url", "http://187.127.235.148:8787")),
         whisper_model=whisper.get("model", "small"),
         whisper_device=whisper.get("device", "cpu"),
         whisper_compute=whisper.get("compute_type", "int8"),

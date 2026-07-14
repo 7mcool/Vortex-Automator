@@ -17,7 +17,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
+import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -66,11 +69,16 @@ def post_video_to_page(cfg: Config, video_path: str, caption: str) -> str | None
         log.warning("Facebook : vidéo introuvable %s", video_path)
         return None
     desc = _cta(caption)
+    # --form-string : valeur LITTÉRALE (désactive l'interprétation curl d'un '@'
+    # ou '<' initial comme référence de fichier — sinon une légende commençant par
+    # « @sophos… » casserait le post PUBLIC, voire ferait fuiter un fichier local).
+    # source=@"..." : guillemets pour qu'un chemin contenant une virgule ne soit
+    # pas scindé par curl (syntaxe multi-fichiers).
     cmd = [
         "curl", "-s", "-X", "POST", f"{GRAPH}/{_page_id(cfg)}/videos",
-        "-F", f"access_token={token}",
-        "-F", f"description={desc}",
-        "-F", f"source=@{video_path}",
+        "--form-string", f"access_token={token}",
+        "--form-string", f"description={desc}",
+        "-F", f'source=@"{video_path}"',
     ]
     try:
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=600).stdout
@@ -83,6 +91,81 @@ def post_video_to_page(cfg: Config, video_path: str, caption: str) -> str | None
         return data["id"]
     log.error("Facebook : réponse inattendue : %s", str(data)[:300])
     return None
+
+
+def media_url(cfg: Config, filename: str) -> str:
+    """URL PUBLIQUE d'un clip (servi par le dashboard) — l'API Reels Instagram
+    exige une URL vidéo publiquement téléchargeable par les serveurs Meta."""
+    base = (getattr(cfg, "media_base_url", "") or "http://187.127.235.148:8787").rstrip("/")
+    tok = os.environ.get("MEDIA_TOKEN", "") or os.environ.get("DASHBOARD_TOKEN", "")
+    return f"{base}/media/{tok}/{filename}"
+
+
+def _ig_business_id(cfg: Config, token: str) -> str | None:
+    """ID du compte Instagram Business relié à la Page (None si aucun).
+    Se peuple dès que Michel relie son vrai compte IG à la Page dans Business Suite."""
+    try:
+        url = f"{GRAPH}/{_page_id(cfg)}?fields=instagram_business_account&access_token={token}"
+        with urllib.request.urlopen(url, timeout=30) as r:
+            acc = json.load(r).get("instagram_business_account")
+        return acc.get("id") if acc else None
+    except Exception:
+        return None
+
+
+def post_reel_to_instagram(cfg: Config, video_url: str, caption: str) -> str | None:
+    """Publie un Reel Instagram (conteneur → attente FINISHED → publication).
+    Retourne l'ID du média ou None. Nécessite un compte IG Business relié à la Page."""
+    token = _page_token(cfg)
+    if not token:
+        return None
+    ig = _ig_business_id(cfg, token)
+    if not ig:
+        log.warning("Instagram : aucun compte IG Business relié à la Page — Reel ignoré.")
+        return None
+    # 1) créer le conteneur média
+    data = urllib.parse.urlencode({
+        "media_type": "REELS", "video_url": video_url,
+        "caption": _cta(caption), "access_token": token,
+    }).encode()
+    try:
+        req = urllib.request.Request(f"{GRAPH}/{ig}/media", data=data)
+        with urllib.request.urlopen(req, timeout=60) as r:
+            cid = json.load(r).get("id")
+    except Exception as exc:
+        log.error("Instagram : création du conteneur échouée (%s)", exc)
+        return None
+    if not cid:
+        return None
+    # 2) attendre la fin du traitement de la vidéo (jusqu'à ~2,5 min)
+    for _ in range(30):
+        time.sleep(5)
+        try:
+            with urllib.request.urlopen(
+                    f"{GRAPH}/{cid}?fields=status_code&access_token={token}", timeout=30) as r:
+                status = json.load(r).get("status_code")
+        except Exception:
+            status = None
+        if status == "FINISHED":
+            break
+        if status == "ERROR":
+            log.error("Instagram : traitement média en ERROR")
+            return None
+    else:
+        log.warning("Instagram : média pas prêt à temps — abandon.")
+        return None
+    # 3) publier
+    pub = urllib.parse.urlencode({"creation_id": cid, "access_token": token}).encode()
+    try:
+        req = urllib.request.Request(f"{GRAPH}/{ig}/media_publish", data=pub)
+        with urllib.request.urlopen(req, timeout=60) as r:
+            mid = json.load(r).get("id")
+        if mid:
+            log.info("Instagram : Reel publié (%s)", mid)
+        return mid
+    except Exception as exc:
+        log.error("Instagram : publication échouée (%s)", exc)
+        return None
 
 
 def page_ok(cfg: Config) -> str | None:

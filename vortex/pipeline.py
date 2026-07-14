@@ -216,7 +216,14 @@ def execute_plan(cfg: Config, db: Database, plan: list[dict], live: bool) -> Non
         # Aimant vers YouTube : republier les clips VERTICAUX sur la Page Facebook
         # avec un CTA « Sermon complet 👉 YouTube ». Derrière l'interrupteur
         # facebook_publish (voir config) pour ne pas reposter tout le backlog.
-        if cfg.facebook_publish and ("tiktok" in row["name"] or "_short" in row["name"]):
+        keys = row.keys()
+        name_lc = (row["name"] or "").lower()
+        fb_selected = ("tiktok" in name_lc) or ("_short" in name_lc)
+        cat = row["category"] if "category" in keys else ""
+        h = (row["height"] if "height" in keys else 0) or 0
+        w = (row["width"] if "width" in keys else 0) or 0
+        fb_vertical = cat in ("short", "long_vertical") or (h and w and h > w)
+        if cfg.facebook_publish and fb_selected and fb_vertical:
             try:
                 from . import facebook_client
                 if facebook_client.available(cfg):

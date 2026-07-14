@@ -148,7 +148,7 @@ def generate_metadata(channel: str, speakers: list[str], caption: str, transcrip
                 "thumb_title": str(data.get("thumb_title", "")).strip()[:60],
             }
         except (urllib.error.URLError, urllib.error.HTTPError, KeyError,
-                ValueError, json.JSONDecodeError) as exc:
+                IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
             log.warning("DeepSeek tentative %d/3 échouée : %s", attempt + 1, exc)
             time.sleep(2 * (attempt + 1))
     log.error("DeepSeek indisponible — repli sur la génération locale.")
