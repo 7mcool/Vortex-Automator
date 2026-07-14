@@ -115,31 +115,30 @@ def _ig_business_id(cfg: Config, token: str) -> str | None:
         return None
 
 
-def post_reel_to_instagram(cfg: Config, video_url: str, caption: str) -> str | None:
-    """Publie un Reel Instagram (conteneur → attente FINISHED → publication).
-    Retourne l'ID du média ou None. Nécessite un compte IG Business relié à la Page."""
+def _ig_publish_media(cfg: Config, params: dict, label: str = "média") -> str | None:
+    """Cycle de publication Instagram commun (Reel comme Story) :
+    conteneur média → attente du statut FINISHED (jusqu'à ~2,5 min, Meta télécharge
+    et transcode la vidéo) → media_publish. Retourne l'ID publié ou None.
+    Nécessite un compte IG Business relié à la Page."""
     token = _page_token(cfg)
     if not token:
         return None
     ig = _ig_business_id(cfg, token)
     if not ig:
-        log.warning("Instagram : aucun compte IG Business relié à la Page — Reel ignoré.")
+        log.warning("Instagram : aucun compte IG Business relié à la Page — %s ignoré.", label)
         return None
     # 1) créer le conteneur média
-    data = urllib.parse.urlencode({
-        "media_type": "REELS", "video_url": video_url,
-        "caption": _cta(caption), "access_token": token,
-    }).encode()
+    data = urllib.parse.urlencode({**params, "access_token": token}).encode()
     try:
         req = urllib.request.Request(f"{GRAPH}/{ig}/media", data=data)
         with urllib.request.urlopen(req, timeout=60) as r:
             cid = json.load(r).get("id")
     except Exception as exc:
-        log.error("Instagram : création du conteneur échouée (%s)", exc)
+        log.error("Instagram %s : création du conteneur échouée (%s)", label, exc)
         return None
     if not cid:
         return None
-    # 2) attendre la fin du traitement de la vidéo (jusqu'à ~2,5 min)
+    # 2) attendre la fin du traitement
     for _ in range(30):
         time.sleep(5)
         try:
@@ -151,10 +150,10 @@ def post_reel_to_instagram(cfg: Config, video_url: str, caption: str) -> str | N
         if status == "FINISHED":
             break
         if status == "ERROR":
-            log.error("Instagram : traitement média en ERROR")
+            log.error("Instagram %s : traitement média en ERROR", label)
             return None
     else:
-        log.warning("Instagram : média pas prêt à temps — abandon.")
+        log.warning("Instagram %s : média pas prêt à temps — abandon.", label)
         return None
     # 3) publier
     pub = urllib.parse.urlencode({"creation_id": cid, "access_token": token}).encode()
@@ -163,11 +162,82 @@ def post_reel_to_instagram(cfg: Config, video_url: str, caption: str) -> str | N
         with urllib.request.urlopen(req, timeout=60) as r:
             mid = json.load(r).get("id")
         if mid:
-            log.info("Instagram : Reel publié (%s)", mid)
+            log.info("Instagram %s publié (%s)", label, mid)
         return mid
     except Exception as exc:
-        log.error("Instagram : publication échouée (%s)", exc)
+        log.error("Instagram %s : publication échouée (%s)", label, exc)
         return None
+
+
+def post_reel_to_instagram(cfg: Config, video_url: str, caption: str) -> str | None:
+    """Publie un Reel Instagram (clip vertical + légende + CTA YouTube)."""
+    return _ig_publish_media(
+        cfg, {"media_type": "REELS", "video_url": video_url, "caption": _cta(caption)}, "Reel")
+
+
+def post_story_to_instagram(cfg: Config, video_url: str) -> str | None:
+    """Publie une Story Instagram (vidéo, 24 h) — rappel quotidien vers la chaîne."""
+    return _ig_publish_media(cfg, {"media_type": "STORIES", "video_url": video_url}, "Story")
+
+
+def post_story_to_facebook(cfg: Config, video_path: str) -> str | None:
+    """Publie une Story vidéo sur la Page Facebook (upload résumable en 3 temps :
+    start → envoi binaire → finish). Retourne l'ID du post ou None."""
+    token = _page_token(cfg)
+    if not token or not Path(video_path).exists():
+        return None
+    pid = _page_id(cfg)
+    # 1) démarrer la session d'upload
+    try:
+        start = urllib.parse.urlencode({"upload_phase": "start", "access_token": token}).encode()
+        with urllib.request.urlopen(
+                urllib.request.Request(f"{GRAPH}/{pid}/video_stories", data=start), timeout=60) as r:
+            d = json.load(r)
+        video_id, upload_url = d.get("video_id"), d.get("upload_url")
+    except Exception as exc:
+        log.error("Facebook Story : démarrage échoué (%s)", exc)
+        return None
+    if not video_id or not upload_url:
+        log.error("Facebook Story : réponse start inattendue")
+        return None
+    # 2) envoyer le fichier (binaire) vers l'URL d'upload fournie par Meta
+    size = Path(video_path).stat().st_size
+    cmd = ["curl", "-s", "-X", "POST", upload_url,
+           "-H", f"Authorization: OAuth {token}",
+           "-H", "offset: 0", "-H", f"file_size: {size}",
+           "--data-binary", f"@{video_path}"]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=600).stdout
+    except Exception as exc:
+        log.error("Facebook Story : envoi du fichier échoué (%s)", exc)
+        return None
+    if "true" not in out.lower():
+        log.error("Facebook Story : upload réponse inattendue : %s", out[:200])
+        return None
+    # 3) finaliser (publie la story)
+    try:
+        fin = urllib.parse.urlencode(
+            {"upload_phase": "finish", "video_id": video_id, "access_token": token}).encode()
+        with urllib.request.urlopen(
+                urllib.request.Request(f"{GRAPH}/{pid}/video_stories", data=fin), timeout=90) as r:
+            d = json.load(r)
+        post_id = d.get("post_id") or (video_id if d.get("success") else None)
+        if post_id:
+            log.info("Facebook : Story publiée (%s)", post_id)
+        return post_id
+    except Exception as exc:
+        log.error("Facebook Story : finalisation échouée (%s)", exc)
+        return None
+
+
+def post_story_both(cfg: Config, video_path: str) -> dict:
+    """Story du jour sur Instagram ET Facebook (rappel quotidien vers YouTube).
+    Le clip doit être dans data/exports (servi publiquement pour Instagram)."""
+    ig_url = media_url(cfg, Path(video_path).name)
+    return {
+        "instagram": post_story_to_instagram(cfg, ig_url),
+        "facebook": post_story_to_facebook(cfg, video_path),
+    }
 
 
 def page_ok(cfg: Config) -> str | None:

@@ -429,7 +429,11 @@ def process_one_source(cfg: Config, db: Database) -> int:
         db.conn.commit()
         return 0
     clips = _ask_clips(cfg, segs, duration)
-    log.info("%d extraits proposés par DeepSeek", len(clips))
+    # Ordre CHRONOLOGIQUE : Partie 1 = le passage le plus tôt dans le sermon, etc.
+    # → une vraie série « Partie 1/2/3 » qui suit le déroulé de la prédication.
+    clips.sort(key=lambda c: c["start"])
+    total = len(clips)
+    log.info("%d extraits proposés par DeepSeek", total)
 
     src_w, src_h = _probe_dims(str(src))
     chan = src.parent.name
@@ -441,7 +445,10 @@ def process_one_source(cfg: Config, db: Database) -> int:
         stem = f"clip_{chan}_{src.stem[:24]}_{i}_{int(c['start'])}"
         # Indice pasteur dans la légende (l'IA nomme si cohérent, sinon écarte l'invité)
         prefix = f"Prédication de {pastor}. " if pastor else ""
-        info = {"description": f"{prefix}{c['title']} — {c['hook']} {c['description']}"}
+        # part/total : marqueurs de série lus par metadata.py pour ajouter
+        # « Partie i/N » + le CTA suspense « la suite sur YouTube ».
+        info = {"description": f"{prefix}{c['title']} — {c['hook']} {c['description']}",
+                "part": i, "total": total}
         # 1) version HORIZONTALE → pipeline YouTube habituel
         out_h = cfg.source_dir / f"{stem}.mp4"
         if not _cut_horizontal(str(src), c["start"], c["end"], out_h, src_w, src_h):
@@ -455,7 +462,8 @@ def process_one_source(cfg: Config, db: Database) -> int:
         if vert_ok:
             out_v.with_name(out_v.stem + ".info.json").write_text(json.dumps(
                 {"title": c["title"], "hook": c["hook"],
-                 "description": c["description"], "type": c["type"]},
+                 "description": c["description"], "type": c["type"],
+                 "part": i, "total": total},
                 ensure_ascii=False), encoding="utf-8")
             # 2b) le vertical part AUSSI en YouTube SHORT si ≤ 180 s (décision Michel :
             #     vertical = YouTube Short + TikTok ; horizontal = YouTube classique).
@@ -466,7 +474,8 @@ def process_one_source(cfg: Config, db: Database) -> int:
                     out_s.write_bytes(out_v.read_bytes())
                     out_s.with_name(short_stem + ".info.json").write_text(
                         json.dumps({"description": f"{prefix}{c['title']} — {c['hook']} "
-                                    f"{c['description']}", "format": "short"},
+                                    f"{c['description']}", "format": "short",
+                                    "part": i, "total": total},
                                    ensure_ascii=False), encoding="utf-8")
                 except OSError as exc:
                     log.warning("Copie Short échouée : %s", exc)

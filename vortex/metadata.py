@@ -20,6 +20,8 @@ from .db import Database
 
 log = logging.getLogger("vortex.metadata")
 
+YT_CHANNEL = "https://www.youtube.com/@sophos_prophetikos"
+
 # Mots vides français (pour l'extraction de mots-clés)
 STOPWORDS = set("""
 le la les un une des du de d l et ou mais donc or ni car que qui quoi dont où
@@ -172,6 +174,44 @@ def transcript_quality(text: str) -> tuple[bool, str]:
     return True, ""
 
 
+def series_meta(path: str | None) -> tuple[int, int]:
+    """Lit (part, total) dans le sidecar {clip}.info.json écrit par le clipper.
+    Retourne (0, 0) si absent — la vidéo n'est pas un extrait de série (ex. les
+    vidéos TikTok d'origine)."""
+    if not path:
+        return 0, 0
+    try:
+        info = Path(path).with_suffix(".info.json")
+        if not info.exists():
+            return 0, 0
+        d = json.loads(info.read_text(encoding="utf-8"))
+        return int(d.get("part", 0) or 0), int(d.get("total", 0) or 0)
+    except Exception:
+        return 0, 0
+
+
+def apply_series(title: str, description: str, part: int, total: int) -> tuple[str, str]:
+    """Cadre « Partie i/N » dans le titre + CTA suspense en tête de description :
+    la boucle de binge (« la suite est sur la chaîne ») qui fait revenir l'audience."""
+    if total < 2 or part < 1:
+        return title, description
+    tag = f" (Partie {part}/{total})"
+    if title.rstrip().endswith("#Shorts"):
+        stem = title.rstrip()[:-len("#Shorts")].rstrip()
+        base = stem[:100 - len(tag) - len(" #Shorts")].rstrip(" —-·")
+        title = f"{base}{tag} #Shorts"
+    else:
+        title = title[:100 - len(tag)].rstrip(" —-·") + tag
+    if part < total:
+        lead = (f"🔥 PARTIE {part}/{total} de cette prédication.\n"
+                f"▶ Ne rate pas la suite — toutes les parties et le sermon complet "
+                f"sur la chaîne 👉 {YT_CHANNEL}")
+    else:
+        lead = (f"🔥 PARTIE {part}/{total}, la dernière !\n"
+                f"▶ Revois toute la série et le sermon complet sur la chaîne 👉 {YT_CHANNEL}")
+    return title, f"{lead}\n\n{description}"[:4900]
+
+
 def prepare_video(cfg: Config, db: Database, video_id: int) -> bool:
     """TRANSCRIBED -> READY : génère titre/description/tags."""
     row = db.get(video_id)
@@ -233,6 +273,12 @@ def prepare_video(cfg: Config, db: Database, video_id: int) -> bool:
             db.conn.commit()
         if thumb:
             db.update_fields(video_id, thumb_title=thumb)
+
+    # Série « Partie i/N » (boucle de binge) si le clip vient d'un sermon découpé.
+    part, total = series_meta(row["path"])
+    title, description = apply_series(title, description, part, total)
+    if total >= 2:
+        log.info("Série : [%d] %s → Partie %d/%d", video_id, row["name"], part, total)
 
     db.set_state(
         video_id, "READY", f"métadonnées générées ({source})",
