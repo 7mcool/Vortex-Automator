@@ -217,8 +217,8 @@ def build_ass(cfg: Config, *, width: int, height: int, duration: float,
     fs_handle = int(height / 32)
     margin_lr = int(width * 0.07)
     # Largeur maximale des lignes CALCULÉE (bold uppercase ≈ 0,62 × fontsize par caractère)
-    hook_chars = max(int(width * 0.90 / (fs_hook * 0.62)), 8)
-    kara_chars = max(int(width * 0.90 / (fs_kara * 0.62)), 6)
+    hook_chars = max(int(width * 0.84 / (fs_hook * 0.62)), 8)
+    kara_chars = max(int(width * 0.84 / (fs_kara * 0.62)), 6)
     hook_top = int(height * 0.16)
     # Sous-titres TOUJOURS bas (≈ 12 % du bas = zone caption standard, sous le
     # visage). Badges : haut = 7 % du haut (au-dessus du visage), bas = 11 %.
@@ -247,7 +247,9 @@ def build_ass(cfg: Config, *, width: int, height: int, duration: float,
     full_hook = " ".join(words)
     longest = max((len(w) for w in words), default=8)
     need_cpl = max((len(full_hook) + 2) // 3, longest)   # caractères/ligne visés
-    usable = width * 0.90
+    # largeur utile 0,84 (marge de sécurité) : le texte s'étire intelligemment
+    # mais ne touche JAMAIS les bords (retour Michel 14/07)
+    usable = width * 0.84
     fs_hook = min(fs_hook, int(usable / (need_cpl * 0.62)))
     fs_hook = max(fs_hook, int(height / 30))             # plancher lisible
     hook_chars = max(int(usable / (fs_hook * 0.62)), longest)
