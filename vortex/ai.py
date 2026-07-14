@@ -20,7 +20,31 @@ import urllib.request
 log = logging.getLogger("vortex.ai")
 
 API_URL = "https://api.deepseek.com/chat/completions"
-MODEL = "deepseek-chat"
+# Modèle « Pro » raisonnement (deepseek-reasoner / R1) pour la qualité du SEO
+# (retour Michel 14/07 : utiliser la version Pro, pas le modèle rapide).
+# Surchargeable via DEEPSEEK_MODEL.
+MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-reasoner")
+
+
+def _parse_json_obj(content: str) -> dict:
+    """Extrait le 1er objet JSON d'une réponse (le modèle raisonnement peut
+    l'entourer de texte ou de balises ```json)."""
+    content = (content or "").strip()
+    if content.startswith("```"):
+        content = content.split("```", 2)[1]
+        if content.lstrip().lower().startswith("json"):
+            content = content.lstrip()[4:]
+    try:
+        return json.loads(content)
+    except Exception:
+        pass
+    start, end = content.find("{"), content.rfind("}")
+    if start != -1 and end > start:
+        try:
+            return json.loads(content[start:end + 1])
+        except Exception:
+            pass
+    return {}
 
 PROMPT = """Tu es l'éditeur YouTube de la chaîne « {channel} », dédiée aux prédications et \
 à la motivation chrétienne (en français, public francophone d'Afrique de l'Ouest).
@@ -75,13 +99,17 @@ def generate_metadata(channel: str, speakers: list[str], caption: str, transcrip
         caption=(caption or "(vide)")[:1500],
         transcript=(transcript or "(vide)")[:6000],
     )
-    body = json.dumps({
+    reasoner = "reasoner" in MODEL
+    payload = {
         "model": MODEL,
         "messages": [{"role": "user", "content": prompt}],
-        "response_format": {"type": "json_object"},
-        "temperature": 1.0,
-        "max_tokens": 900,
-    }).encode()
+        # le modèle raisonnement consomme des tokens en « réflexion »
+        "max_tokens": 4000 if reasoner else 900,
+    }
+    if not reasoner:  # deepseek-reasoner ignore/rejette temperature + response_format
+        payload["response_format"] = {"type": "json_object"}
+        payload["temperature"] = 1.0
+    body = json.dumps(payload).encode()
 
     for attempt in range(3):
         try:
@@ -89,9 +117,9 @@ def generate_metadata(channel: str, speakers: list[str], caption: str, transcrip
                 API_URL, data=body,
                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
             )
-            with urllib.request.urlopen(req, timeout=90) as r:
+            with urllib.request.urlopen(req, timeout=180 if reasoner else 90) as r:
                 resp = json.load(r)
-            data = json.loads(resp["choices"][0]["message"]["content"])
+            data = _parse_json_obj(resp["choices"][0]["message"]["content"])
             title = str(data.get("title", "")).strip()
             description = str(data.get("description", "")).strip()
             tags = [str(t).strip() for t in data.get("tags", []) if str(t).strip()]

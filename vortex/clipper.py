@@ -140,6 +140,28 @@ def _transcribe_timed(cfg: Config, path: str) -> tuple[list, float]:
     return segs, duration
 
 
+def _parse_json_obj(content: str) -> dict:
+    """Extrait le 1er objet JSON d'une réponse (le modèle raisonnement peut
+    l'entourer de texte ou de balises ```json)."""
+    content = (content or "").strip()
+    if content.startswith("```"):
+        content = content.split("```", 2)[1]
+        if content.lstrip().lower().startswith("json"):
+            content = content.lstrip()[4:]
+    try:
+        return json.loads(content)
+    except Exception:
+        pass
+    start = content.find("{")
+    end = content.rfind("}")
+    if start != -1 and end > start:
+        try:
+            return json.loads(content[start:end + 1])
+        except Exception:
+            pass
+    return {}
+
+
 def _ask_clips(cfg: Config, segs: list, duration: float) -> list[dict]:
     key = os.environ.get("DEEPSEEK_API_KEY")
     if not key:
@@ -150,21 +172,26 @@ def _ask_clips(cfg: Config, segs: list, duration: float) -> list[dict]:
     if len(transcript) > 90000:  # ~2 h de sermon max par appel
         transcript = transcript[:90000]
     max_clips = 8 if duration > 1200 else 5
-    body = json.dumps({
-        "model": "deepseek-chat",
+    model = os.environ.get("DEEPSEEK_MODEL", "deepseek-reasoner")
+    reasoner = "reasoner" in model
+    payload = {
+        "model": model,
         "messages": [{"role": "user", "content": CLIP_PROMPT.format(
             duration=duration, transcript=transcript, max_clips=max_clips)}],
-        "response_format": {"type": "json_object"},
-        "temperature": 0.7,
-        "max_tokens": 2000,
-    }).encode()
+        # le modèle raisonnement consomme des tokens en « réflexion » : marge large
+        "max_tokens": 8000 if reasoner else 2500,
+    }
+    if not reasoner:  # deepseek-reasoner ignore/rejette temperature + response_format
+        payload["response_format"] = {"type": "json_object"}
+        payload["temperature"] = 0.7
+    body = json.dumps(payload).encode()
     try:
         req = urllib.request.Request(
             "https://api.deepseek.com/chat/completions", data=body,
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=180) as r:
+        with urllib.request.urlopen(req, timeout=300) as r:
             resp = json.load(r)
-        clips = json.loads(resp["choices"][0]["message"]["content"]).get("clips", [])
+        clips = _parse_json_obj(resp["choices"][0]["message"]["content"]).get("clips", [])
     except Exception as exc:
         log.error("DeepSeek clipper échoué : %s", exc)
         return []
