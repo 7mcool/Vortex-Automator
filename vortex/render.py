@@ -56,6 +56,14 @@ ACCENTS = [  # hex ASS BBGGRR — accent accroche + mot karaoké. Palette VIBRAN
     "00D7FF",  # or (une option, pas LA règle)
     "5050FF",  # rouge corail
 ]
+PILL_ACCENTS = [  # accents SATURÉS et FONCÉS, lisibles sur pilule blanche (BGR), variés
+    "2A1AD8",  # rouge
+    "D8481A",  # bleu roi
+    "A81AC8",  # magenta
+    "C81A6A",  # violet
+    "1A9A2A",  # vert foncé
+    "1A6AE8",  # orange foncé
+]
 BADGE_COLORS = [  # fond du badge CTA (hex ASS BBGGRR)
     "1323E6",  # rouge YouTube
     "E66F1E",  # bleu
@@ -216,7 +224,7 @@ def _karaoke_events(words_file: Path, duration: float, max_chars: int) -> list[s
 
 def build_ass(cfg: Config, *, width: int, height: int, duration: float,
               title: str, words_file: Path | None, skip_hook: bool = False,
-              lifted: bool = False, video_id: int = 0, luminous: bool = True) -> str:
+              lifted: bool = False, video_id: int = 0, luminous: bool = False) -> str:
     v = _variant(video_id)
     fontname = v["font"] if not Path(r"C:\Windows\Fonts\arial.ttf").exists() else "Arial"
     accent = r"\c&H" + v["accent"] + "&"
@@ -276,6 +284,12 @@ def build_ass(cfg: Config, *, width: int, height: int, duration: float,
     target_lines = 1 if n <= 11 else (2 if n <= 30 else 3)
     cpl = max((n + target_lines - 1) // target_lines, longest)
     hook_lines = list(_wrap(full_hook, cpl, 3))
+    # Force le nombre de lignes VISÉ : les frontières de mots créent souvent une
+    # ligne de trop (accroche qui déborde sur le visage). On élargit cpl jusqu'à
+    # tenir en target_lines — reste compact, au-dessus du prédicateur.
+    while len(hook_lines) > target_lines and cpl < n:
+        cpl += 1
+        hook_lines = list(_wrap(full_hook, cpl, 3))
     n_lines = max(1, len(hook_lines))
     longest_line = max((len(ln) for ln in hook_lines), default=cpl)
     fs_fill = int(usable / (max(longest_line, 1) * 0.58))   # remplit la largeur
@@ -293,7 +307,7 @@ def build_ass(cfg: Config, *, width: int, height: int, duration: float,
                       f"&H00202020,&H50000000,-1,-1,0,0,100,100,0.5,0,1,"
                       f"{max(int(fs_hook * 0.09), 4)},2,8,{margin_lr},{margin_lr},{hook_top},1")
     else:
-        hook_accent = r"\c&H1A24C8&"   # rouge chaud lisible sur pilule blanche
+        hook_accent = r"\c&H" + PILL_ACCENTS[video_id % len(PILL_ACCENTS)] + "&"  # varié, lisible
         hook_ink = r"\c&H262626&"      # gris très foncé
         hook_style = (f"Style: Hook,{fontname},{fs_hook},&H00262626,&H00262626,"
                       f"&H0AF2F2F2,&H0AF2F2F2,-1,-1,0,0,100,100,0.5,0,3,"
