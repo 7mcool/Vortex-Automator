@@ -222,9 +222,33 @@ def _karaoke_events(words_file: Path, duration: float, max_chars: int) -> list[s
     return out
 
 
+def _face_top_fraction(src: str, at: float = 1.5) -> float | None:
+    """Fraction verticale (0 = tout en haut) du HAUT du visage détecté dans le clip.
+    Sert à décider où placer l'accroche : si le visage est trop haut (pas de place
+    en haut), on descend l'accroche au centre. None si aucun visage détecté."""
+    try:
+        import cv2
+        import numpy as np
+        out = subprocess.run(
+            [find_ffmpeg(), "-v", "quiet", "-ss", f"{at:.1f}", "-i", src,
+             "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-"],
+            capture_output=True, timeout=60)
+        img = cv2.imdecode(np.frombuffer(out.stdout, np.uint8), cv2.IMREAD_COLOR)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        casc = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+        faces = casc.detectMultiScale(gray, 1.1, 5, minSize=(40, 40))
+        if len(faces):
+            _x, y, _w, _h = max(faces, key=lambda f: f[2] * f[3])
+            return y / img.shape[0]
+    except Exception as exc:
+        log.debug("Détection visage (position accroche) impossible : %s", exc)
+    return None
+
+
 def build_ass(cfg: Config, *, width: int, height: int, duration: float,
               title: str, words_file: Path | None, skip_hook: bool = False,
-              lifted: bool = False, video_id: int = 0, luminous: bool = False) -> str:
+              lifted: bool = False, video_id: int = 0, luminous: bool = False,
+              hook_center: bool = False) -> str:
     v = _variant(video_id)
     fontname = v["font"] if not Path(r"C:\Windows\Fonts\arial.ttf").exists() else "Arial"
     accent = r"\c&H" + v["accent"] + "&"
@@ -356,6 +380,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     events = [
         f"Dialogue: 0,{_ass_time(0)},{_ass_time(duration)},Handle,,0,0,0,,{handle}",
     ]
+    # Accroche EN HAUT par défaut (façon OpusClip, au-dessus de la tête). On ne la
+    # descend AU CENTRE que pour les rares cas où le visage est trop haut et ne
+    # laisse pas la place en haut (retour Michel 15/07). \an5 = ancrage au centre ;
+    # sinon on garde la position du style (haut, \an8, MarginV=hook_top).
+    if hook_center:
+        cx, cy = width // 2, int(height * 0.46)
+        hook_pos = r"{\an5\pos(" + str(cx) + "," + str(cy) + ")}"
+    else:
+        hook_pos = ""
     if not skip_hook:
         # Accroche : 5 premières secondes seulement (elle recouvre la vidéo).
         # Supprimée quand la vidéo affiche déjà son message à l'écran
@@ -367,9 +400,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             glow = (r"{\blur" + str(g) + r"\bord" + str(g) +
                     r"\1a&HFF&\3c&H" + v["accent"] + r"&\4a&HFF&\shad0}")
             events.append(
-                f"Dialogue: 0,{_ass_time(0.2)},{_ass_time(5.2)},Hook,,0,0,0,,{zoom_in}{glow}{hook_plain}")
+                f"Dialogue: 0,{_ass_time(0.2)},{_ass_time(5.2)},Hook,,0,0,0,,{hook_pos}{zoom_in}{glow}{hook_plain}")
         events.append(
-            f"Dialogue: 1,{_ass_time(0.2)},{_ass_time(5.2)},Hook,,0,0,0,,{zoom_in}{hook_txt}")
+            f"Dialogue: 1,{_ass_time(0.2)},{_ass_time(5.2)},Hook,,0,0,0,,{hook_pos}{zoom_in}{hook_txt}")
     # CTA agressifs ÉPARPILLÉS : 6 fenêtres à des moments ET des positions
     # variés (bas / haut en alternance), taille auto-ajustée, pulsation.
     amp = v["pulse_amp"]
@@ -438,13 +471,20 @@ def render_video(cfg: Config, db: Database, video_id: int) -> bool:
     if not hook_text:
         hook_text = row["title"] or ""
 
+    # Position de l'accroche : EN HAUT par défaut ; AU CENTRE seulement si le visage
+    # est trop haut et ne laisse pas la place en haut (retour Michel 15/07 : « au
+    # centre pour les rares cas où il n'y a pas la place en haut »).
+    ftop = _face_top_fraction(str(src), min(2.0, (duration or 4) / 2))
+    hook_center = ftop is not None and ftop < 0.22
+
     ass_file = exports / f"{row['name']}.ass"
     ass_file.write_text(
         build_ass(cfg, width=out_w, height=out_h,
                   duration=duration, title=hook_text,
                   words_file=words_file if words_file.exists() else None,
                   skip_hook=(has_text == "texte"),
-                  lifted=(has_text in ("texte", "douteux")), video_id=video_id),
+                  lifted=(has_text in ("texte", "douteux")), video_id=video_id,
+                  hook_center=hook_center),
         encoding="utf-8")
 
     def _ffpath(p: str) -> str:

@@ -260,6 +260,74 @@ def _html(cfg: Config, video_id: int, title: str, subject_uri: str, is_card: boo
 </body></html>"""
 
 
+def _html_photo(cfg: Config, video_id: int, title: str, photo_uri: str) -> str:
+    """Cover PRO SANS DÉTOURAGE (retour Michel 15/07 : « plus de détouré, c'est pas
+    pro »). Photo du pasteur en demi-cadre PLEIN (object-cover), FONDUE en dégradé
+    vers un fond coloré côté texte — comme un poster. Texte géant par-dessus."""
+    acc, rgb = COVER_ACCENTS[video_id % len(COVER_ACCENTS)]
+    title_html = _impact_lines(title, acc)
+    short = _short_words(title)
+    fs = 132 if len(short) <= 4 else (112 if len(short) <= 6 else 94)
+    longest = max((len(w) for w in short), default=8)
+    fs = min(fs, int(W * 0.52 / (longest * 0.60)))
+    stroke = max(int(fs * 0.03), 3)
+    logo_uri = ""
+    lf = ASSETS_DIR / "logo-chaine.png"
+    if lf.exists():
+        logo_uri = _b64(lf.read_bytes())
+    left = video_id % 2 == 1                       # pasteur à gauche ou à droite
+    pside = "left" if left else "right"
+    oside = "right" if left else "left"
+    tside = "right:3%;left:50%" if left else "left:3%;right:50%"
+    grad = "90deg" if left else "270deg"
+    corner = "100%" if left else "0%"
+    return f"""<!doctype html><html><head><meta charset="utf-8"><style>
+  * {{ margin:0; padding:0; box-sizing:border-box; }}
+  body {{ width:{W}px; height:{H}px; overflow:hidden; position:relative;
+         font-family:'Anton','Archivo Black','DejaVu Sans',sans-serif;
+         background:radial-gradient(130% 100% at {corner} 50%, rgba({rgb},.22), #0b0712 62%); }}
+  .photo {{ position:absolute; top:0; {pside}:0; width:60%; height:100%;
+           background:url('{photo_uri}') center top/cover;
+           filter:saturate(1.22) contrast(1.08) brightness(1.05); }}
+  .blend {{ position:absolute; top:0; {pside}:0; width:62%; height:100%;
+           background:linear-gradient({grad}, transparent 52%, #0b0712 95%); }}
+  .vig {{ position:absolute; inset:0;
+         background:radial-gradient(ellipse at center, transparent 56%, rgba(0,0,0,.5) 100%); }}
+  .txt {{ position:absolute; top:50%; transform:translateY(-50%); {tside}; text-align:center; z-index:3; }}
+  h1 {{ font-size:{fs}px; line-height:1.08; letter-spacing:1px; color:#fff;
+       -webkit-text-stroke:{stroke}px rgba(0,0,0,.9);
+       text-shadow:0 4px 0 rgba(0,0,0,.5),0 12px 28px rgba(0,0,0,.75),0 0 42px rgba({rgb},.45); }}
+  .trait {{ width:60%; height:12px; margin:22px auto 0; border-radius:8px; transform:skewX(-16deg);
+           background:linear-gradient(90deg,transparent,{acc},#fff,{acc},transparent);
+           box-shadow:0 0 26px rgba({rgb},.7); }}
+  .logo {{ position:absolute; top:22px; {oside}:26px; width:92px; height:92px; border-radius:50%;
+          border:4px solid #fff; box-shadow:0 8px 20px rgba(0,0,0,.5); z-index:4; }}
+  .badge {{ position:absolute; bottom:24px; {oside}:30px; background:{acc}; color:#0a0a12; font-weight:bold;
+           font-size:28px; padding:8px 22px; border-radius:32px; border:3px solid #fff; z-index:4;
+           box-shadow:0 10px 22px rgba(0,0,0,.5),0 0 20px rgba({rgb},.5); }}
+</style></head><body>
+  <div class="photo"></div><div class="blend"></div><div class="vig"></div>
+  <div class="txt"><h1>{title_html}</h1><div class="trait"></div></div>
+  {f'<img class="logo" src="{logo_uri}">' if logo_uri else ''}
+  <div class="badge">{html_mod.escape(cfg.channel_name.upper())}</div>
+</body></html>"""
+
+
+def _portrait_raw(row, video_id: int) -> bytes | None:
+    """Photo BRUTE du pasteur (sans détourage) depuis la bibliothèque, si l'orateur
+    est identifié. Sert de fond de cover façon poster."""
+    speaker = row["speaker"] if "speaker" in row.keys() and row["speaker"] else None
+    if not speaker:
+        return None
+    folder = ASSETS_DIR / "portraits" / _slug(speaker)
+    if not folder.is_dir():
+        return None
+    photos = sorted(p for p in folder.iterdir() if p.suffix.lower() in (".jpg", ".jpeg", ".png"))
+    if not photos:
+        return None
+    return photos[video_id % len(photos)].read_bytes()
+
+
 def _html_old(cfg: Config, video_id: int, title: str, subject_uri: str, is_card: bool) -> str:
     bg, accent, glow = THEMES[video_id % len(THEMES)]
     line1, line2 = _split_title(title)
@@ -410,12 +478,15 @@ def generate_thumb(cfg: Config, db: Database, video_id: int) -> bool:
     thumbs_dir.mkdir(parents=True, exist_ok=True)
     out = thumbs_dir / f"{row['name']}.jpg"
 
-    subject_png = _portrait_for(row, video_id)
-    subject_uri = _b64(subject_png) if subject_png else ""
-
     thumb_title = (row["thumb_title"] if "thumb_title" in row.keys() and row["thumb_title"]
                    else row["title"])
-    html = _html(cfg, video_id, thumb_title, subject_uri, is_card=False)
+    # Cover PRO sans détourage : photo BRUTE du pasteur en poster (retour Michel
+    # 15/07 : « plus de détouré, pas pro »). Repli carte texte si orateur inconnu.
+    photo = _portrait_raw(row, video_id)
+    if photo:
+        html = _html_photo(cfg, video_id, thumb_title, _b64(photo))
+    else:
+        html = _html(cfg, video_id, thumb_title, "", is_card=False)
     if not _render_html(html, out):
         return False
 
