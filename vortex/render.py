@@ -487,8 +487,12 @@ def render_video(cfg: Config, db: Database, video_id: int) -> bool:
                   duration=duration, title=hook_text,
                   words_file=words_file if words_file.exists() else None,
                   skip_hook=(has_text == "texte"),
-                  lifted=(has_text in ("texte", "douteux")), video_id=video_id,
-                  hook_center=hook_center),
+                  # lifted = ne PAS ajouter de karaoké. Vrai si texte détecté OU si
+                  # c'est un TikTok hedjav (contenu créateur DÉJÀ monté avec OpusClip :
+                  # sous-titres incrustés) → garantit 0 double même si l'OCR rate.
+                  lifted=(has_text in ("texte", "douteux")
+                          or (row["name"] or "").startswith("hedjav")),
+                  video_id=video_id, hook_center=hook_center),
         encoding="utf-8")
 
     def _ffpath(p: str) -> str:
