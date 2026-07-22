@@ -23,7 +23,8 @@ from .db import Database
 
 log = logging.getLogger("vortex.textdetect")
 
-SAMPLES = 5          # images analysées par vidéo (réparties sur la durée)
+SAMPLES = 10         # images analysées par vidéo (correctif 17/07 : 5 ratait les
+                     # sous-titres intermittents qui n'apparaissent que pendant la parole)
 MIN_WORDS_HIT = 2    # mots lisibles pour compter une image comme "avec texte"
 
 
@@ -102,7 +103,10 @@ def detect_video_text(ffmpeg: str, tesseract: str, path: Path, duration: float) 
                 continue
             if count_real_words(ocr_image(tesseract, frame)) >= MIN_WORDS_HIT:
                 hits += 1
-    if hits >= 3:
+    # Seuil abaissé (correctif 17/07) : sur 10 images, ≥2 avec texte = sous-titré.
+    # Mieux vaut détecter « texte » à tort (on saute le karaoké) que l'inverse
+    # (double sous-titre). 1 seule image = douteux (on saute aussi le karaoké).
+    if hits >= 2:
         return "texte", hits
     if hits == 0:
         return "sans_texte", hits

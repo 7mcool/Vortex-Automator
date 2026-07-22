@@ -39,6 +39,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("command", choices=[
         "scan", "transcribe", "prepare", "plan", "publish", "sync-channel", "status", "auth",
         "retry", "engage", "detect-text", "render", "thumbs", "clip",
+        "story", "backfill-social",
     ])
     parser.add_argument("-n", "--count", type=int, default=5,
                         help="nombre de vidéos à traiter (défaut : 5)")
@@ -102,6 +103,16 @@ def main(argv: list[str] | None = None) -> int:
             from .thumbs import thumbs_pending
             n = thumbs_pending(cfg, db, limit=args.count)
             print(f"{n} cover(s) générée(s) (style violet/or)")
+
+        elif args.command == "story":
+            from .pipeline import publish_daily_story
+            res = publish_daily_story(cfg, db)
+            print(f"Story du jour : {res}")
+
+        elif args.command == "backfill-social":
+            from .pipeline import backfill_social
+            n = backfill_social(cfg, db, count=args.count if args.count != 5 else 12)
+            print(f"Backfill : {n} clip(s) posté(s) sur Facebook + Instagram")
 
         elif args.command == "retry":
             from .pipeline import retry_failed

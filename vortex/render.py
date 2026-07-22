@@ -426,7 +426,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         f"Dialogue: 1,{_ass_time(max(duration - 5.0, 0))},{_ass_time(duration)},BadgeBas,,0,0,0,,"
         f"{{\\fs{badge_fs(v['cta_final'])}}}{pulse}{v['cta_final']}")
 
-    if words_file and words_file.exists():
+    # Sous-titres karaoké : UNIQUEMENT si la vidéo n'a PAS déjà son propre texte
+    # incrusté (lifted = has_text texte/douteux). Correctif 17/07 : sans ce garde,
+    # on ajoutait le karaoké PAR-DESSUS les sous-titres existants → double sous-titre
+    # sur presque toutes les vidéos (retour Michel).
+    if words_file and words_file.exists() and not lifted:
         if v["caption_mode"] == "pop":
             events += _pop_events(words_file, duration, fs_pop=int(height / 15))
         elif v["caption_mode"] == "build":

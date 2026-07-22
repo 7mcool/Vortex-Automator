@@ -216,14 +216,15 @@ def execute_plan(cfg: Config, db: Database, plan: list[dict], live: bool) -> Non
         # Aimant vers YouTube : republier les clips VERTICAUX sur la Page Facebook
         # avec un CTA « Sermon complet 👉 YouTube ». Derrière l'interrupteur
         # facebook_publish (voir config) pour ne pas reposter tout le backlog.
+        # Sélection par ORIENTATION uniquement (correctif 17/07 : l'ancien filtre
+        # basé sur le nom « tiktok »/« _short » excluait les vidéos hedjav_* — le gros
+        # du contenu vertical — donc rien ne partait sur FB/IG).
         keys = row.keys()
-        name_lc = (row["name"] or "").lower()
-        fb_selected = ("tiktok" in name_lc) or ("_short" in name_lc)
         cat = row["category"] if "category" in keys else ""
         h = (row["height"] if "height" in keys else 0) or 0
         w = (row["width"] if "width" in keys else 0) or 0
         fb_vertical = cat in ("short", "long_vertical") or (h and w and h > w)
-        if cfg.facebook_publish and fb_selected and fb_vertical:
+        if cfg.facebook_publish and fb_vertical:
             try:
                 from . import facebook_client
                 if facebook_client.available(cfg):
@@ -238,7 +239,7 @@ def execute_plan(cfg: Config, db: Database, plan: list[dict], live: bool) -> Non
         # dashboard. On n'essaie donc QUE si le rendu existe (l'original sur le
         # disque source n'est pas servi publiquement).
         rendered = "render_path" in keys and row["render_path"] and Path(row["render_path"]).exists()
-        if cfg.instagram_publish and fb_selected and fb_vertical and rendered:
+        if cfg.instagram_publish and fb_vertical and rendered:
             try:
                 from . import facebook_client
                 if facebook_client.available(cfg):
@@ -248,6 +249,69 @@ def execute_plan(cfg: Config, db: Database, plan: list[dict], live: bool) -> Non
                         log.info("Instagram : Reel publié (%s) pour %s", ig_id, row["name"])
             except Exception as exc:
                 log.warning("Instagram : publication ignorée (%s)", exc)
+
+
+def _rendered_clips(cfg: Config):
+    """Clips verticaux DÉJÀ habillés et servables (data/exports/*_v.mp4), triés."""
+    return sorted((cfg.data_dir / "exports").glob("*_v.mp4"))
+
+
+def _caption_for(db: Database, clip_name: str) -> str:
+    """Titre de la vidéo correspondant au fichier {name}_v.mp4, sinon défaut."""
+    name = clip_name[:-2] if clip_name.endswith("_v") else clip_name
+    row = db.conn.execute("SELECT title FROM videos WHERE name = ?", (name,)).fetchone()
+    return (row["title"] if row and row["title"] else "Un message pour ta foi")
+
+
+def publish_daily_story(cfg: Config, db: Database) -> dict | None:
+    """Story du jour sur Instagram + Facebook, à partir d'un clip vertical déjà
+    habillé (rotation via data/last_story.txt pour ne pas reposter le même)."""
+    from . import facebook_client
+    if not facebook_client.available(cfg):
+        log.warning("Story : Facebook/Instagram indisponible (pas de token).")
+        return None
+    clips = _rendered_clips(cfg)
+    if not clips:
+        log.warning("Story : aucun clip habillé disponible.")
+        return None
+    marker = cfg.data_dir / "last_story.txt"
+    last = marker.read_text(encoding="utf-8").strip() if marker.exists() else ""
+    names = [c.name for c in clips]
+    idx = (names.index(last) + 1) % len(clips) if last in names else 0
+    pick = clips[idx]
+    res = facebook_client.post_story_both(cfg, str(pick))
+    marker.write_text(pick.name, encoding="utf-8")
+    log.info("Story : %s → Instagram=%s Facebook=%s", pick.name,
+             res.get("instagram"), res.get("facebook"))
+    return res
+
+
+def backfill_social(cfg: Config, db: Database, count: int = 12) -> int:
+    """Poste un lot de clips déjà habillés sur la Page Facebook + en Reel Instagram,
+    pour PEUPLER les réseaux (les pages étaient vides). Mémorise ce qui est fait
+    (data/backfill_done.txt) pour ne pas reposter les mêmes."""
+    from . import facebook_client
+    if not facebook_client.available(cfg):
+        log.warning("Backfill : Facebook/Instagram indisponible.")
+        return 0
+    marker = cfg.data_dir / "backfill_done.txt"
+    done = set(marker.read_text(encoding="utf-8").splitlines()) if marker.exists() else set()
+    todo = [c for c in _rendered_clips(cfg) if c.name not in done][:count]
+    posted = 0
+    for c in todo:
+        caption = _caption_for(db, c.stem)
+        try:
+            fb_id = facebook_client.post_video_to_page(cfg, str(c), caption)
+            ig_url = facebook_client.media_url(cfg, c.name)
+            ig_id = facebook_client.post_reel_to_instagram(cfg, ig_url, caption)
+            log.info("Backfill : %s → Facebook=%s Instagram=%s", c.name, fb_id, ig_id)
+            if fb_id or ig_id:
+                posted += 1
+            done.add(c.name)
+        except Exception as exc:
+            log.warning("Backfill : %s ignoré (%s)", c.name, exc)
+    marker.write_text("\n".join(sorted(done)), encoding="utf-8")
+    return posted
 
 
 def retry_failed(db: Database) -> int:
