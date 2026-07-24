@@ -14,17 +14,18 @@ $sourceRoot = Join-Path $repoRoot "videos\sources"
 $remoteRoot = "/opt/vortex/repo/videos/sources"
 
 if (-not (Test-Path -LiteralPath $IdentityFile)) {
-    throw "Clé SSH introuvable : $IdentityFile"
+    throw "Cle SSH introuvable : $IdentityFile"
 }
 
-# DEUX catégories par chaîne :
-#   1. LONGS sermons (directs terminés ≥20 min) → /streams
-#   2. COURTS enseignements (3-20 min) → /videos
+# DEUX categories par chaine :
+#   1. LONGS sermons (directs termines >= 20 min) -> /streams
+#   2. COURTS enseignements (3-20 min) -> /videos
+# Handles must match VPS fetch_youtube.sh directory names exactly
 $channels = @(
     @{ Handle = "lamaisondesagesse" }
-    @{ Handle = "cfrèresc" }
-    @{ Handle = "EgliseGénérationDaniel" }
-    @{ Handle = "ÉgliseVasesdHonneur" }
+    @{ Handle = "cfreresc" }
+    @{ Handle = "EgliseGenerationDaniel" }
+    @{ Handle = "EgliseVasesdHonneur" }
 )
 
 $categories = @(
@@ -62,20 +63,20 @@ foreach ($chan in $channels) {
             $match += " & duration <= $($cat.MaxSec)"
         }
 
-        Write-Host "--- @$handle/$tab [$label] ($($cat.MinSec)s → $($cat.MaxSec)s) ---"
-        $args = $commonArgs + @(
+        Write-Host "--- @$handle/$tab [$label] ($($cat.MinSec)s -> $($cat.MaxSec)s) ---"
+        $dlArgs = $commonArgs + @(
             "--match-filter", $match,
             "--download-archive", $archive,
             "--output", $output,
             $url
         )
-        & python @args
+        & python @dlArgs
         if ($LASTEXITCODE -notin @(0, 101)) {
-            Write-Warning "yt-dlp a échoué pour @$handle/$tab (code $LASTEXITCODE) — on continue"
+            Write-Warning "yt-dlp failed for @$handle/$tab (code $LASTEXITCODE) - continuing"
         }
     }
 
-    # SCP vers le VPS (tous les nouveaux .mp4 de la chaîne)
+    # SCP to VPS (all new .mp4 for this channel)
     $uploadedFile = Join-Path $destination ".uploaded-to-vps.txt"
     $uploaded = [System.Collections.Generic.HashSet[string]]::new(
         [System.StringComparer]::OrdinalIgnoreCase
@@ -88,20 +89,20 @@ foreach ($chan in $channels) {
 
     $remoteDir = "$remoteRoot/$handle"
     $sshTarget = "$VpsUser@$VpsHost"
-    & ssh -i $IdentityFile -o IdentitiesOnly=yes $sshTarget "mkdir -p '$remoteDir'"
-    if ($LASTEXITCODE -ne 0) { throw "Création du dossier distant $remoteDir impossible" }
+    ssh -i $IdentityFile -o IdentitiesOnly=yes $sshTarget "mkdir -p '$remoteDir'"
+    if ($LASTEXITCODE -ne 0) { throw "Cannot create remote directory: $remoteDir (code $LASTEXITCODE)" }
 
     foreach ($video in Get-ChildItem -LiteralPath $destination -Filter "*.mp4" -File) {
         if ($uploaded.Contains($video.Name)) { continue }
 
-        Write-Host "Envoi HD vers le VPS : $($video.Name)"
-        & scp -i $IdentityFile -o IdentitiesOnly=yes -- $video.FullName "${sshTarget}:$remoteDir/"
-        if ($LASTEXITCODE -ne 0) { throw "Envoi impossible : $($video.Name)" }
+        Write-Host "Upload to VPS: $($video.Name)"
+        scp -i $IdentityFile -o IdentitiesOnly=yes -- $video.FullName "${sshTarget}:$remoteDir/"
+        if ($LASTEXITCODE -ne 0) { throw "SCP failed: $($video.Name) (code $LASTEXITCODE)" }
 
         $info = Join-Path $destination "$($video.BaseName).info.json"
         if (Test-Path -LiteralPath $info) {
-            & scp -i $IdentityFile -o IdentitiesOnly=yes -- $info "${sshTarget}:$remoteDir/"
-            if ($LASTEXITCODE -ne 0) { throw "Envoi des métadonnées impossible : $info" }
+            scp -i $IdentityFile -o IdentitiesOnly=yes -- $info "${sshTarget}:$remoteDir/"
+            if ($LASTEXITCODE -ne 0) { throw "SCP metadata failed: $info (code $LASTEXITCODE)" }
         }
 
         [System.IO.File]::AppendAllText(
@@ -114,10 +115,9 @@ foreach ($chan in $channels) {
 }
 
 if ($StartRemoteClip) {
-    Write-Host "Demarrage du decoupage sur le VPS..."
-    $remoteCmd = "cd /opt/vortex/repo; docker compose -f docker-compose.vps.yml run --rm --no-deps vortex python -m vortex clip"
-    ssh -i $IdentityFile -o IdentitiesOnly=yes "$VpsUser@$VpsHost" $remoteCmd
-    if ($LASTEXITCODE -ne 0) { throw "Le decoupage distant a echoue (code $LASTEXITCODE)" }
+    Write-Host "Starting clip on VPS..."
+    ssh -i $IdentityFile -o IdentitiesOnly=yes "$VpsUser@$VpsHost" "cd /opt/vortex/repo; docker compose -f docker-compose.vps.yml run --rm --no-deps vortex python -m vortex clip"
+    if ($LASTEXITCODE -ne 0) { throw "Remote clipping failed (code $LASTEXITCODE)" }
 }
 
-Write-Host "Synchronisation YouTube terminee."
+Write-Host "YouTube sync complete."
