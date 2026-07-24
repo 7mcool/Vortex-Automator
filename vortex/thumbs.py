@@ -53,7 +53,7 @@ def valid_thumbnail(path: str | Path | None) -> bool:
     try:
         from PIL import Image
         with Image.open(candidate) as image:
-            return image.size == (3840, 2160) and image.format == "JPEG"
+            return image.size in ((3840, 2160), (2160, 3840)) and image.format == "JPEG"
     except Exception:
         return False
 
@@ -455,7 +455,7 @@ def _html_old(cfg: Config, video_id: int, title: str, subject_uri: str, is_card:
 </body></html>"""
 
 
-def _render_html(html: str, out_jpg: Path) -> bool:
+def _render_html(html: str, out_jpg: Path, vp_w: int = W, vp_h: int = H) -> bool:
     try:
         from PIL import Image
         from playwright.sync_api import sync_playwright
@@ -464,10 +464,10 @@ def _render_html(html: str, out_jpg: Path) -> bool:
         master = masters / out_jpg.name
         with sync_playwright() as p:
             browser = p.chromium.launch(args=["--no-sandbox", "--disable-dev-shm-usage"])
-            # Master réellement UHD (3840×2160), résolution désormais recommandée
-            # par YouTube. Le fichier API final reste sous sa limite stricte de 2 Mio.
+            # UHD (3840×2160 horizontal) ou VERTICAL (2160×3840 pour Shorts).
+            # YouTube recommande 2160p pour les vignettes Shorts personnalisées.
             context = browser.new_context(
-                viewport={"width": W, "height": H},
+                viewport={"width": vp_w, "height": vp_h},
                 device_scale_factor=3,
             )
             page = context.new_page()
@@ -540,7 +540,15 @@ def generate_thumb(cfg: Config, db: Database, video_id: int) -> bool:
         html = _html_photo(cfg, video_id, thumb_title, _b64(photo))
     else:
         html = _html(cfg, video_id, thumb_title, "", is_card=False)
-    if not _render_html(html, out):
+
+    # Shorts : occasionnellement une miniature VERTICALE (9:16) pour le flux Shorts.
+    # Environ 1/4 des Shorts, varié par video_id. Les vidéos longues restent en 16:9.
+    dur = row["duration_s"] or 0
+    is_short = dur <= 180
+    vertical = is_short and (video_id % 4 == 0)
+    vp_w, vp_h = (H, W) if vertical else (W, H)
+
+    if not _render_html(html, out, vp_w=vp_w, vp_h=vp_h):
         return False
 
     cols = [r[1] for r in db.conn.execute("PRAGMA table_info(videos)")]
@@ -548,7 +556,8 @@ def generate_thumb(cfg: Config, db: Database, video_id: int) -> bool:
         db.conn.execute("ALTER TABLE videos ADD COLUMN thumb_path TEXT")
         db.conn.commit()
     db.update_fields(video_id, thumb_path=str(out))
-    log.info("Cover v3 générée : %s", out.name)
+    log.info("Cover générée : %s [%s %dx%d]", out.name,
+             "VERTICAL" if vertical else "horizontal", vp_w * 3, vp_h * 3)
     return True
 
 
