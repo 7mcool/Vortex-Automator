@@ -3,3 +3,9 @@ faster-whisper>=1.0          # transcription locale (CPU, int8) — pas besoin d
 google-api-python-client>=2.100
 google-auth-oauthlib>=1.0
 google-auth-httplib2>=0.1
+Pillow>=10.0
+yt-dlp
+playwright
+opencv-python-headless==4.10.0.84
+rembg
+onnxruntime

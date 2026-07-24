@@ -39,7 +39,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("command", choices=[
         "scan", "transcribe", "prepare", "plan", "publish", "sync-channel", "status", "auth",
         "retry", "engage", "detect-text", "render", "thumbs", "clip",
-        "story", "backfill-social",
+        "story", "backfill-social", "detect-speaker",
     ])
     parser.add_argument("-n", "--count", type=int, default=5,
                         help="nombre de vidéos à traiter (défaut : 5)")
@@ -88,6 +88,11 @@ def main(argv: list[str] | None = None) -> int:
             from .textdetect import detect_pending
             stats = detect_pending(cfg, db, limit=args.count)
             print(f"Détection de texte : {stats}")
+
+        elif args.command == "detect-speaker":
+            from .textdetect import detect_speaker_pending
+            stats = detect_speaker_pending(cfg, db, limit=args.count)
+            print(f"Identification du pasteur : {stats}")
 
         elif args.command == "render":
             from .render import render_pending

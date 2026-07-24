@@ -27,6 +27,15 @@ SAMPLES = 10         # images analysées par vidéo (correctif 17/07 : 5 ratait 
                      # sous-titres intermittents qui n'apparaissent que pendant la parole)
 MIN_WORDS_HIT = 2    # mots lisibles pour compter une image comme "avec texte"
 
+# Pasteurs CONNUS : on ne nomme un orateur QUE si son nom (ou celui de son église)
+# est LU à l'écran (règle de Michel : jamais de supposition). Motifs tolérants aux
+# accents/à l'OCR approximatif. Ordre = priorité si plusieurs correspondances.
+KNOWN_PASTORS = [
+    (re.compile(r"amess?an", re.I), "Jacques Amessan"),
+    (re.compile(r"bodjiy|bodjy|generation daniel|génération daniel", re.I), "Aimé Bodjiyé"),
+    (re.compile(r"sanogo|vases? d.?honneur", re.I), "Mohammed Sanogo"),
+]
+
 
 def find_tool(name: str, hints: list[str]) -> str | None:
     exe = shutil.which(name)
@@ -143,3 +152,60 @@ def detect_pending(cfg: Config, db: Database, limit: int = 0) -> dict:
         stats[verdict] += 1
         log.info("Texte #%d : %s (%d/%d images)", r["id"], verdict, hits, SAMPLES)
     return stats
+
+
+def detect_speaker(ffmpeg: str, tesseract: str, path: Path, duration: float) -> str | None:
+    """Lit plusieurs images de la vidéo (OCR) et renvoie le nom d'un pasteur CONNU
+    s'il est écrit à l'écran (nom ou église). Renvoie None sinon — on ne devine
+    jamais l'orateur."""
+    texts = []
+    with tempfile.TemporaryDirectory() as tmp:
+        for i in range(SAMPLES):
+            t = duration * (0.05 + 0.9 * i / max(SAMPLES - 1, 1))
+            frame = Path(tmp) / f"s{i}.png"
+            subprocess.run(
+                [ffmpeg, "-v", "quiet", "-ss", f"{t:.1f}", "-i", str(path),
+                 "-frames:v", "1", "-vf", "scale=720:-1", "-y", str(frame)],
+                capture_output=True, timeout=60,
+            )
+            if frame.exists():
+                texts.append(ocr_image(tesseract, frame))
+    joined = " ".join(texts)
+    for rx, name in KNOWN_PASTORS:
+        if rx.search(joined):
+            return name
+    return None
+
+
+def detect_speaker_pending(cfg: Config, db: Database, limit: int = 0) -> dict:
+    """Identifie le pasteur des vidéos hedjav (nom lu à l'écran) et le range dans la
+    colonne `speaker`. On marque TOUJOURS après passage (nom trouvé, ou "" si aucun
+    nom connu détecté) pour ne jamais re-scanner deux fois la même vidéo."""
+    tesseract = find_tesseract()
+    if not tesseract:
+        raise FileNotFoundError(
+            "Tesseract introuvable — installez-le : winget install UB-Mannheim.TesseractOCR")
+    ffmpeg = find_ffmpeg()
+
+    cols = [r[1] for r in db.conn.execute("PRAGMA table_info(videos)")]
+    if "speaker" not in cols:
+        db.conn.execute("ALTER TABLE videos ADD COLUMN speaker TEXT")
+        db.conn.commit()
+
+    sql = ("SELECT id, path, duration_s FROM videos WHERE speaker IS NULL "
+           "AND name LIKE 'hedjav%' AND duration_s IS NOT NULL")
+    if limit:
+        sql += f" LIMIT {int(limit)}"
+    rows = db.conn.execute(sql).fetchall()
+    found = 0
+    for r in rows:
+        try:
+            name = detect_speaker(ffmpeg, tesseract, Path(r["path"]), r["duration_s"])
+        except Exception as exc:
+            log.warning("Détection pasteur impossible pour #%d : %s", r["id"], exc)
+            continue
+        db.update_fields(r["id"], speaker=(name or ""))
+        if name:
+            found += 1
+            log.info("Pasteur #%d identifié : %s", r["id"], name)
+    return {"scannées": len(rows), "identifiés": found}

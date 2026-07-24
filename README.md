@@ -7,31 +7,35 @@ intervention humaine.
 
 ## Ce que fait la machine, chaque jour
 
-1. **Collecte** — téléchargement des nouvelles vidéos TikTok (yt-dlp) et des
-   sermons des chaînes partenaires (avec l'accord de leurs responsables).
-2. **Découpage intelligent** (`vortex clip`) — façon OpusClip : transcription
+1. **Collecte** — téléchargement TikTok sur le VPS. Pour YouTube, la chaîne
+   principale est lue depuis `@lamaisondesagesse/streams` et seuls les directs
+   terminés d'au moins 20 minutes sont retenus. YouTube bloquant l'IP du VPS,
+   la tâche Windows `Vortex YouTube Long Sermons` télécharge en 1080p puis
+   transfère au serveur ; le VPS peut aussi utiliser un fichier cookies.
+2. **Découpage intelligent** (`vortex clip`) — transcription
    horodatée (faster-whisper), choix des meilleurs passages par IA (DeepSeek),
-   coupes aux frontières de phrases, **deux formats par extrait** :
-   - horizontal 16:9 (jusqu'à 3840 px) → YouTube ;
-   - vertical 9:16 recadré automatiquement sur le visage (OpenCV) → TikTok.
+   coupes aux frontières de phrases, retrait des silences, punch-ins légers,
+   **deux formats par extrait** :
+   - horizontal 16:9 → YouTube ;
+   - vertical 9:16 recadré sur le visage à chaque plan (OpenCV) → Shorts/social.
 3. **Compréhension** — transcription locale (Whisper), détection du texte déjà
    présent à l'image (Tesseract) pour ne jamais écrire par-dessus.
 4. **SEO** — titre accrocheur, description et mots-clés générés par IA à partir
    du contenu réel ; aucun prédicateur n'est nommé sans certitude.
-5. **Habillage** (`vortex render`) — sortie **4K** (YouTube sert alors ses
-   meilleurs codecs) : phrase choc, sous-titres animés mot à mot (karaoké),
-   appels à l'action variés (s'abonner, like, partage), débruitage + netteté.
-   Styles, couleurs et positions changent à chaque vidéo.
+5. **Habillage** (`vortex render`) — 1080p pour les clips déjà montés et QHD
+   pour les extraits bruts : phrase choc, sous-titres animés, CTA, filtres et
+   audio normalisé à −14 LUFS. Les sous-titres commencent après l'accroche.
 6. **Covers** (`vortex thumbs`) — miniatures générées en HTML/CSS rendu par
-   Chromium headless : portrait du pasteur (si identifié), gros titres
-   blanc/or, fonds dramatiques (`assets/fonds/`), logo de la chaîne.
-7. **Publication** — 5 vidéos/jour, upload privé puis passage public programmé
-   (9h, 12h, 15h, 18h, 21h). Une vidéo sans habillage n'est **jamais** publiée.
+   Chromium en **3840×2160** : portrait HD du pasteur seulement si son nom est
+   confirmé, titre court et logo. Les portraits nets sont collectés depuis les
+   vidéos officielles avec URL, timecode, dimensions et hash dans un manifeste.
+7. **Publication** — upload privé puis passage public programmé. Le code bloque
+   désormais réellement tout upload sans rendu et miniature Vortex présents.
 8. **Engagement** (`vortex engage`) — question épinglée sous chaque vidéo et
    réponses automatiques aux commentaires.
-9. **TikTok** (`demo-tiktok/`) — mini-app web (Login Kit + Content Posting
-   API) : publication des extraits verticaux sur le compte TikTok du ministère
-   (dossier en cours de validation chez TikTok).
+9. **TikTok** (`demo-tiktok/`) — mini-app de test vers les brouillons TikTok.
+   La file automatique de Direct Post n'est pas encore branchée ; ne pas la
+   présenter comme une publication TikTok entièrement autonome.
 
 ## Architecture
 
@@ -48,8 +52,8 @@ vps/daily.sh (cron quotidien, conteneur Docker)
 | `vortex/textdetect.py` | OCR du texte incrusté existant |
 | `vortex/transcribe.py` | transcription Whisper + mots horodatés |
 | `vortex/metadata.py` | titres/descriptions/tags par IA + contrôle qualité |
-| `vortex/render.py` | habillage 4K : sous-titres animés, CTA, filtres |
-| `vortex/thumbs.py` | covers HTML/CSS → JPEG (Chromium headless) |
+| `vortex/render.py` | habillage vidéo : sous-titres, CTA, filtres, audio −14 LUFS |
+| `vortex/thumbs.py` | covers HTML/CSS → JPEG UHD <2 Mio (Chromium + Pillow) |
 | `vortex/pipeline.py` | plan de publication + créneaux + upload YouTube |
 | `vortex/engage.py` | commentaires : question posée + réponses |
 | `vortex/dashboard.py` | tableau de bord web (suivi mobile) |

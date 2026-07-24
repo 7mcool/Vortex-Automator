@@ -58,8 +58,15 @@ def plan_batch(cfg: Config, db: Database, count: int) -> list[dict]:
     for row in candidates:
         if len(plan) >= count:
             break
-        if "render_path" in row.keys() and not row["render_path"]:
-            log.info("Reportée [%d] %s — pas encore habillée (rendu manquant)",
+        render_path = row["render_path"] if "render_path" in row.keys() else None
+        if not render_path or not Path(render_path).is_file():
+            log.info("Reportée [%d] %s — rendu habillé absent ou périmé",
+                     row["id"], row["name"])
+            continue
+        thumb_path = row["thumb_path"] if "thumb_path" in row.keys() else None
+        from .thumbs import valid_thumbnail
+        if not valid_thumbnail(thumb_path):
+            log.info("Reportée [%d] %s — miniature Vortex absente ou périmée",
                      row["id"], row["name"])
             continue
         match = already_on_channel(db, row["title"] or "", row["caption"])
@@ -73,7 +80,7 @@ def plan_batch(cfg: Config, db: Database, count: int) -> list[dict]:
             "title": row["title"],
             "duration_s": row["duration_s"],
             "category": row["category"],
-            "cover": row["cover_path"],
+            "cover": thumb_path,
             "srt": row["srt_path"],
         })
     # Créneaux indicatifs pour l'affichage (recalculés au moment de l'upload réel)
@@ -152,6 +159,15 @@ def execute_plan(cfg: Config, db: Database, plan: list[dict], live: bool) -> Non
             log.warning("Fichier inaccessible (disque débranché ?) : %s — vidéo laissée en READY",
                         row_check["path"])
             continue
+        render_path = row_check["render_path"] if "render_path" in row_check.keys() else None
+        thumb_path = row_check["thumb_path"] if "thumb_path" in row_check.keys() else None
+        if not render_path or not Path(render_path).is_file():
+            log.error("Publication bloquée pour %s : rendu Vortex absent", row_check["name"])
+            continue
+        from .thumbs import valid_thumbnail
+        if not valid_thumbnail(thumb_path):
+            log.error("Publication bloquée pour %s : miniature Vortex absente", row_check["name"])
+            continue
         # Créneau recalculé maintenant : jamais de publishAt déjà passé.
         slots = next_free_slots(cfg, db, 1)
         if not slots:
@@ -163,10 +179,8 @@ def execute_plan(cfg: Config, db: Database, plan: list[dict], live: bool) -> Non
             log.warning("Vidéo #%d déjà réservée par un autre processus — ignorée.", p["video_id"])
             continue
         row = db.get(p["video_id"])
-        # Version habillée (Phase 2) si elle existe, sinon l'original
-        upload_path = row["path"]
-        if "render_path" in row.keys() and row["render_path"] and Path(row["render_path"]).exists():
-            upload_path = row["render_path"]
+        # Garde stricte : seule la version habillée validée ci-dessus peut partir.
+        upload_path = row["render_path"]
         try:
             youtube_id = youtube_client.upload_video(
                 cfg, service,
@@ -190,17 +204,11 @@ def execute_plan(cfg: Config, db: Database, plan: list[dict], live: bool) -> Non
             log.error("✘ Upload échoué pour %s : %s", row["name"], exc)
             continue
 
-        # Cover générée (style violet/or) prioritaire sur la cover TikTok
-        thumb = None
-        if "thumb_path" in row.keys() and row["thumb_path"] and Path(row["thumb_path"]).exists():
-            thumb = row["thumb_path"]
-        elif row["cover_path"] and Path(row["cover_path"]).exists():
-            thumb = row["cover_path"]
-        if thumb:
-            try:
-                youtube_client.set_thumbnail(service, youtube_id, thumb)
-            except Exception as exc:
-                log.warning("Miniature refusée pour %s : %s", row["name"], exc)
+        # Aucune reprise silencieuse de la petite cover TikTok.
+        try:
+            youtube_client.set_thumbnail(service, youtube_id, row["thumb_path"])
+        except Exception as exc:
+            log.error("Miniature Vortex refusée pour %s : %s", row["name"], exc)
         if cfg.upload_captions and row["srt_path"] and Path(row["srt_path"]).exists():
             try:
                 youtube_client.upload_captions(service, youtube_id, row["srt_path"],
@@ -210,6 +218,7 @@ def execute_plan(cfg: Config, db: Database, plan: list[dict], live: bool) -> Non
 
         db.set_state(p["video_id"], "SCHEDULED", f"programmé {publish_at}",
                      youtube_id=youtube_id, publish_at=publish_at)
+        db.record_channel_video(youtube_id, row["title"] or "", publish_at)
         log.info("OK %s -> https://youtu.be/%s (publication %s)",
                  row["name"], youtube_id, publish_at)
 
@@ -228,7 +237,8 @@ def execute_plan(cfg: Config, db: Database, plan: list[dict], live: bool) -> Non
             try:
                 from . import facebook_client
                 if facebook_client.available(cfg):
-                    fb_id = facebook_client.post_video_to_page(cfg, upload_path, row["title"] or "")
+                    fb_id = facebook_client.post_video_to_page(
+                        cfg, upload_path, build_social_caption(cfg, db, row["name"]))
                     if fb_id:
                         log.info("Facebook : clip publié (post %s) pour %s", fb_id, row["name"])
             except Exception as exc:
@@ -244,7 +254,8 @@ def execute_plan(cfg: Config, db: Database, plan: list[dict], live: bool) -> Non
                 from . import facebook_client
                 if facebook_client.available(cfg):
                     ig_url = facebook_client.media_url(cfg, Path(row["render_path"]).name)
-                    ig_id = facebook_client.post_reel_to_instagram(cfg, ig_url, row["title"] or "")
+                    ig_id = facebook_client.post_reel_to_instagram(
+                        cfg, ig_url, build_social_caption(cfg, db, row["name"]))
                     if ig_id:
                         log.info("Instagram : Reel publié (%s) pour %s", ig_id, row["name"])
             except Exception as exc:
@@ -254,6 +265,72 @@ def execute_plan(cfg: Config, db: Database, plan: list[dict], live: bool) -> Non
 def _rendered_clips(cfg: Config):
     """Clips verticaux DÉJÀ habillés et servables (data/exports/*_v.mp4), triés."""
     return sorted((cfg.data_dir / "exports").glob("*_v.mp4"))
+
+
+# Chaîne source YouTube → (pasteur, église). Sert à créditer et à identifier
+# de façon FIABLE (la chaîne = un seul ministère).
+CHANNEL_INFO = {
+    "lamaisondesagesse": ("Jacques Amessan", "La Maison de la Sagesse"),
+    "EgliseGénérationDaniel": ("Aimé Bodjiyé", "Église Génération Daniel"),
+    "ÉgliseVasesdHonneur": ("Mohammed Sanogo", "Église Vases d'Honneur"),
+    "VasesdHonneur": ("Mohammed Sanogo", "Église Vases d'Honneur"),
+}
+# Pasteur → église (pour les clips hedjav dont le nom est LU à l'écran).
+PASTOR_CHURCH = {
+    "Jacques Amessan": "La Maison de la Sagesse",
+    "Aimé Bodjiyé": "Église Génération Daniel",
+    "Mohammed Sanogo": "Église Vases d'Honneur",
+}
+
+
+def _source_url(name: str, tiktok_id) -> str:
+    """Lien vers la vidéo SOURCE (crédit) : la vidéo YouTube d'origine pour les
+    clips (l'ID est dans le nom `clip_<chaîne>_<date>_<idYouTube>_...`), le TikTok
+    d'origine pour les vidéos hedjav (via tiktok_id)."""
+    if name.startswith("clip_"):
+        parts = name.split("_")
+        if len(parts) >= 4 and parts[3]:
+            return f"https://www.youtube.com/watch?v={parts[3]}"
+    elif name.startswith("hedjav") and tiktok_id:
+        return f"https://www.tiktok.com/@hedjav/video/{tiktok_id}"
+    return ""
+
+
+def build_social_caption(cfg: Config, db: Database, clip_name: str) -> str:
+    """Légende enrichie pour Facebook/Instagram : description accrocheuse + pasteur
+    + église + lien vers la vidéo source. Le lien vers NOTRE chaîne YouTube est
+    ajouté ensuite par facebook_client._cta. Règle de Michel : on n'affiche le
+    pasteur/l'église que si on les CONNAÎT — jamais de supposition (pour hedjav,
+    le nom vient de la lecture à l'écran ; vide s'il n'a pas été identifié)."""
+    name = clip_name[:-2] if clip_name.endswith("_v") else clip_name
+    row = db.conn.execute(
+        "SELECT title, description, speaker, tiktok_id FROM videos WHERE name = ?",
+        (name,)).fetchone()
+    title = (row["title"] or "").strip() if row else ""
+    desc = (row["description"] or "").strip() if row else ""
+    speaker = (row["speaker"] or "").strip() if row else ""
+    tiktok_id = row["tiktok_id"] if row else None
+
+    pastor, church = "", ""
+    if name.startswith("clip_"):
+        # Un flux de ministère peut contenir un invité : le nom validé dans les
+        # métadonnées prime, jamais le pasteur habituel déduit de la chaîne.
+        pastor = speaker
+        church = PASTOR_CHURCH.get(pastor, "")
+    elif name.startswith("hedjav"):
+        pastor = speaker
+        church = PASTOR_CHURCH.get(pastor, "")
+
+    blocks = [desc or title or "Un message pour ta foi"]
+    ident = " · ".join(x for x in (
+        f"🎙️ {pastor}" if pastor else "",
+        f"⛪ {church}" if church else "") if x)
+    if ident:
+        blocks.append(ident)
+    src = _source_url(name, tiktok_id)
+    if src:
+        blocks.append(f"🔗 Vidéo source : {src}")
+    return "\n\n".join(blocks)
 
 
 def _caption_for(db: Database, clip_name: str) -> str:
@@ -299,7 +376,7 @@ def backfill_social(cfg: Config, db: Database, count: int = 12) -> int:
     todo = [c for c in _rendered_clips(cfg) if c.name not in done][:count]
     posted = 0
     for c in todo:
-        caption = _caption_for(db, c.stem)
+        caption = build_social_caption(cfg, db, c.stem)
         try:
             fb_id = facebook_client.post_video_to_page(cfg, str(c), caption)
             ig_url = facebook_client.media_url(cfg, c.name)

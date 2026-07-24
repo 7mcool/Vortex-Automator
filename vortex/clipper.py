@@ -280,29 +280,51 @@ def _speech_intervals(segs: list, start: float, end: float,
             merged.append([s, e])                    # gros silence : on coupe
     out = []
     for i, (s, e) in enumerate(merged):
-        a = max(start, s - (pad if i else 0))
+        a = max(start, s - pad)
         b = min(end, e + pad)
         if b - a > 0.3:
             out.append((round(a, 2), round(b, 2)))
     return out or [(start, end)]
 
 
-def _cut_montage(src: str, intervals: list[tuple], out: Path, vf_per: str) -> bool:
+def _cut_montage(src: str, intervals: list[tuple], out: Path,
+                 vf_per: str | list[str]) -> bool:
     """MONTAGE : ré-assemble uniquement les intervalles de parole (silences coupés),
     avec un filtre vidéo par morceau (vf_per). Garde la synchro audio/vidéo."""
+    if not intervals:
+        return False
+    # Un seek d'entrée évite de redécoder les deux heures précédant chaque
+    # extrait. Les trims du graphe deviennent donc relatifs à cette fenêtre.
+    first = min(a for a, _ in intervals)
+    last = max(b for _, b in intervals)
+    seek = max(0.0, first - 0.25)
+    window = max(0.5, last - seek + 0.25)
+
     parts_v, parts_a, n = [], [], len(intervals)
     fc = []
     for i, (a, b) in enumerate(intervals):
-        fc.append(f"[0:v]trim={a}:{b},setpts=PTS-STARTPTS,{vf_per}[v{i}]")
-        fc.append(f"[0:a]atrim={a}:{b},asetpts=PTS-STARTPTS[a{i}]")
+        a_rel, b_rel = max(0.0, a - seek), max(0.0, b - seek)
+        vf = vf_per[i] if isinstance(vf_per, list) else vf_per
+        # Normaliser SAR/pixel format : des crops/zooms différents ne peuvent
+        # sinon pas être concaténés proprement par FFmpeg.
+        fc.append(
+            f"[0:v]trim={a_rel:.3f}:{b_rel:.3f},setpts=PTS-STARTPTS,{vf},"
+            f"setsar=1,format=yuv420p[v{i}]"
+        )
+        fc.append(
+            f"[0:a]atrim={a_rel:.3f}:{b_rel:.3f},"
+            f"asetpts=PTS-STARTPTS[a{i}]"
+        )
         parts_v.append(f"[v{i}]")
         parts_a.append(f"[a{i}]")
     fc.append("".join(f"{parts_v[i]}{parts_a[i]}" for i in range(n))
               + f"concat=n={n}:v=1:a=1[outv][outa]")
-    cmd = [find_ffmpeg(), "-v", "error", "-i", src,
+    cmd = [find_ffmpeg(), "-v", "error", "-ss", f"{seek:.3f}",
+           "-t", f"{window:.3f}", "-i", src,
            "-filter_complex", ";".join(fc), "-map", "[outv]", "-map", "[outa]",
            "-c:v", "libx264", "-preset", "veryfast", "-crf", "21",
-           "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", "-y", str(out)]
+           "-c:a", "aac", "-b:a", "128k", "-ar", "48000",
+           "-movflags", "+faststart", "-y", str(out)]
     try:
         subprocess.run(cmd, capture_output=True, timeout=5400, check=True)
         return out.exists()
@@ -316,6 +338,42 @@ def _cut_horizontal(src: str, start: float, end: float, out: Path,
     """Version YouTube : format d'origine 16:9, plafonné à 3840 de large (jamais de downscale)."""
     vf = "scale=3840:-2:flags=lanczos" if src_w > 3840 else f"scale={src_w}:{src_h}"
     return _cut(src, start, end, out, vf)
+
+
+def _montage_filters(src: str, intervals: list[tuple],
+                     src_w: int, src_h: int) -> tuple[list[str], list[str]]:
+    """Plans horizontaux + verticaux par intervalle de parole.
+
+    Chaque vraie pause devient une coupe. De légers punch-ins alternés donnent
+    du rythme ; le vertical se recadre sur le visage à chaque nouveau plan.
+    """
+    horizontal, vertical = [], []
+    for index, (start, end) in enumerate(intervals):
+        zoom = 1.045 if index % 3 == 1 else 1.0
+        if zoom > 1:
+            crop_w = max(2, int(src_w / zoom) // 2 * 2)
+            crop_h = max(2, int(src_h / zoom) // 2 * 2)
+            horizontal.append(
+                f"crop={crop_w}:{crop_h}:(iw-{crop_w})/2:(ih-{crop_h})/2,"
+                f"scale={src_w}:{src_h}:flags=lanczos"
+            )
+        else:
+            horizontal.append(f"scale={src_w}:{src_h}:flags=lanczos")
+
+        if src_h > src_w:
+            vertical.append("scale=1080:1920:force_original_aspect_ratio=increase,"
+                            "crop=1080:1920")
+            continue
+        crop_h = max(2, int(src_h / zoom) // 2 * 2)
+        crop_w = max(2, int(crop_h * 9 / 16) // 2 * 2)
+        center = _face_center_x(src, (start + end) / 2, src_w, src_h)
+        left = max(0, min(src_w - crop_w, int(center * src_w - crop_w / 2)))
+        top = max(0, (src_h - crop_h) // 2)
+        vertical.append(
+            f"crop={crop_w}:{crop_h}:{left}:{top},"
+            "scale=1080:1920:flags=lanczos"
+        )
+    return horizontal, vertical
 
 
 def _smooth(vals: list[float], k: int = 2) -> list[float]:
@@ -394,6 +452,20 @@ def _probe_dims(path: str) -> tuple[int, int]:
     return int(v["width"]), int(v["height"])
 
 
+def _probe_duration(path: str | Path) -> float | None:
+    """Durée réellement encodée, utilisée notamment pour la limite Shorts."""
+    try:
+        out = subprocess.run(
+            [find_ffmpeg().replace("ffmpeg", "ffprobe"), "-v", "error",
+             "-show_entries", "format=duration", "-of", "default=nw=1:nk=1",
+             str(path)],
+            capture_output=True, text=True, timeout=60, check=True,
+        )
+        return float(out.stdout.strip())
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
 def _ensure_table(db: Database) -> None:
     db.conn.executescript("""
         CREATE TABLE IF NOT EXISTS clip_sources (
@@ -425,8 +497,9 @@ def process_one_source(cfg: Config, db: Database) -> int:
     log.info("Découpage de la source : %s", src.name)
     segs, duration = _transcribe_timed(cfg, str(src))
     if not segs:
-        db.conn.execute("INSERT OR REPLACE INTO clip_sources VALUES (?, datetime('now'), 0)", (str(src),))
-        db.conn.commit()
+        # Ne jamais archiver un échec comme un succès : la source doit être
+        # retentée au passage suivant (modèle indisponible, audio illisible, etc.).
+        log.error("Transcription vide pour %s — source conservée pour reprise", src.name)
         return 0
     clips = _ask_clips(cfg, segs, duration)
     # Ordre CHRONOLOGIQUE : Partie 1 = le passage le plus tôt dans le sermon, etc.
@@ -439,8 +512,16 @@ def process_one_source(cfg: Config, db: Database) -> int:
     chan = src.parent.name
     tiktok_dir = Path("/app/videos/tiktok_queue")
     tiktok_dir.mkdir(parents=True, exist_ok=True)
-    pastor = CHANNEL_PASTORS.get(chan, "")
+    # Le flux /streams contient aussi des invités. Ne jamais déduire « Jacques
+    # Amessan » du seul nom de la chaîne : le nom doit être présent dans le titre.
+    try:
+        from .portraits import speaker_from_info
+        pastor, _ = speaker_from_info(src)
+    except Exception:
+        pastor = None
+    pastor = pastor or ""
     made = 0
+    all_complete = total > 0
     for i, c in enumerate(clips, start=1):
         stem = f"clip_{chan}_{src.stem[:24]}_{i}_{int(c['start'])}"
         # Indice pasteur dans la légende (l'IA nomme si cohérent, sinon écarte l'invité)
@@ -449,17 +530,27 @@ def process_one_source(cfg: Config, db: Database) -> int:
         # « Partie i/N » + le CTA suspense « la suite sur YouTube ».
         info = {"description": f"{prefix}{c['title']} — {c['hook']} {c['description']}",
                 "part": i, "total": total}
+        # Montage réel : les pauses >0,7 s sont retirées, avec punch-ins légers
+        # et nouveau cadrage visage à chaque plan. Les anciennes fonctions
+        # existaient mais n'étaient jamais appelées.
+        intervals = _speech_intervals(segs, c["start"], c["end"])
+        h_filters, v_filters = _montage_filters(
+            str(src), intervals, src_w, src_h
+        )
         # 1) version HORIZONTALE → pipeline YouTube habituel
         out_h = cfg.source_dir / f"{stem}.mp4"
-        if not _cut_horizontal(str(src), c["start"], c["end"], out_h, src_w, src_h):
+        if not _cut_montage(str(src), intervals, out_h, h_filters):
+            all_complete = False
             continue
         out_h.with_name(out_h.stem + ".info.json").write_text(
             json.dumps(info, ensure_ascii=False), encoding="utf-8")
         # 2) version VERTICALE (suivi dynamique du visage) → file d'attente TikTok
         out_v = tiktok_dir / f"{stem}_tiktok.mp4"
-        clip_len = c["end"] - c["start"]
-        vert_ok = _cut_vertical(str(src), c["start"], c["end"], out_v, src_w, src_h)
+        clip_len = sum(end - start for start, end in intervals)
+        vert_ok = _cut_montage(str(src), intervals, out_v, v_filters)
+        short_created = False
         if vert_ok:
+            vertical_len = _probe_duration(out_v) or clip_len
             out_v.with_name(out_v.stem + ".info.json").write_text(json.dumps(
                 {"title": c["title"], "hook": c["hook"],
                  "description": c["description"], "type": c["type"],
@@ -467,7 +558,8 @@ def process_one_source(cfg: Config, db: Database) -> int:
                 ensure_ascii=False), encoding="utf-8")
             # 2b) le vertical part AUSSI en YouTube SHORT si ≤ 180 s (décision Michel :
             #     vertical = YouTube Short + TikTok ; horizontal = YouTube classique).
-            if clip_len <= 180:
+            # Marge de 0,5 s : l'encodage peut ajouter quelques images/audio.
+            if vertical_len <= 179.5:
                 short_stem = f"{stem}_short"
                 out_s = cfg.source_dir / f"{short_stem}.mp4"
                 try:
@@ -475,15 +567,52 @@ def process_one_source(cfg: Config, db: Database) -> int:
                     out_s.with_name(short_stem + ".info.json").write_text(
                         json.dumps({"description": f"{prefix}{c['title']} — {c['hook']} "
                                     f"{c['description']}", "format": "short",
-                                    "part": i, "total": total},
+                                   "part": i, "total": total},
                                    ensure_ascii=False), encoding="utf-8")
+                    short_created = True
                 except OSError as exc:
+                    all_complete = False
                     log.warning("Copie Short échouée : %s", exc)
+        else:
+            all_complete = False
         made += 1
         log.info("Extrait %d/%d : %s (%ds, %s) + vertical%s", i, len(clips),
                  out_h.name, int(clip_len), c["type"],
-                 " + Short YouTube" if (vert_ok and clip_len <= 180) else "")
+                 " + Short YouTube" if short_created else "")
+    if made <= 0:
+        # Même garde pour une réponse IA vide ou des coupes FFmpeg toutes
+        # échouées. L'ancien comportement empoisonnait l'anti-doublon puis
+        # supprimait le sermon original, rendant l'échec irréversible.
+        log.error("Aucun extrait valide pour %s — source conservée pour reprise", src.name)
+        return 0
+    if not all_complete or made != total:
+        log.error(
+            "Montage partiel pour %s (%d/%d) — source conservée pour compléter",
+            src.name, made, total,
+        )
+        return made
+
+    # Constitue automatiquement une bibliothèque HD depuis la vidéo officielle.
+    # Le nom du pasteur doit figurer dans le titre source ; sinon aucune image
+    # n'est attribuée, ce qui évite de confondre un invité avec le pasteur habituel.
+    try:
+        from .portraits import harvest_portraits
+        harvest_portraits(src, duration)
+    except Exception as exc:
+        log.warning("Collecte de portraits ignorée pour %s : %s", src.name, exc)
+
     db.conn.execute("INSERT OR REPLACE INTO clip_sources VALUES (?, datetime('now'), ?)",
                     (str(src), made))
     db.conn.commit()
+    # Libère l'espace « au fur et à mesure » (demande de Michel) : une source de
+    # sermon pèse souvent 0,5–2 Go et devient inutile DÈS que ses extraits sont créés.
+    # On la supprime tout de suite (avec son .info.json) au lieu d'attendre le cron
+    # nocturne, pour ne jamais saturer le disque du VPS partagé. L'archive de
+    # téléchargement (.archive.txt) est conservée : elle évite de re-télécharger.
+    try:
+        src.unlink(missing_ok=True)
+        src.with_suffix(".info.json").unlink(missing_ok=True)
+        log.info("Source supprimée (espace libéré) : %s", src.name)
+    except OSError as exc:
+        log.warning("Suppression de la source impossible (%s) : %s", src.name, exc)
     return made

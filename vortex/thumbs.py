@@ -43,6 +43,21 @@ def _b64(data: bytes, mime: str = "image/png") -> str:
     return f"data:{mime};base64,{base64.b64encode(data).decode()}"
 
 
+def valid_thumbnail(path: str | Path | None) -> bool:
+    """La miniature publiée doit être la génération UHD actuelle et <2 Mio."""
+    if not path:
+        return False
+    candidate = Path(path)
+    if not candidate.is_file() or candidate.stat().st_size > 2_000_000:
+        return False
+    try:
+        from PIL import Image
+        with Image.open(candidate) as image:
+            return image.size == (3840, 2160) and image.format == "JPEG"
+    except Exception:
+        return False
+
+
 def _extract_frames(video: str, duration: float, n: int = 8) -> list[bytes]:
     ffmpeg = find_ffmpeg()
     frames = []
@@ -309,7 +324,6 @@ def _html_photo(cfg: Config, video_id: int, title: str, photo_uri: str) -> str:
   <div class="photo"></div><div class="blend"></div><div class="vig"></div>
   <div class="txt"><h1>{title_html}</h1><div class="trait"></div></div>
   {f'<img class="logo" src="{logo_uri}">' if logo_uri else ''}
-  <div class="badge">{html_mod.escape(cfg.channel_name.upper())}</div>
 </body></html>"""
 
 
@@ -323,6 +337,26 @@ def _portrait_raw(row, video_id: int) -> bytes | None:
     if not folder.is_dir():
         return None
     photos = sorted(p for p in folder.iterdir() if p.suffix.lower() in (".jpg", ".jpeg", ".png"))
+    if not photos:
+        return None
+    # Les portraits collectés automatiquement depuis les streams 1080p passent
+    # avant les anciens screenshots. À défaut, refuser les sources minuscules :
+    # les agrandir ne crée pas de détail et produisait les visages mous signalés.
+    auto = [p for p in photos if p.name.startswith("auto-")]
+    if auto:
+        photos = auto
+    else:
+        try:
+            from PIL import Image
+            qualified = []
+            for photo in photos:
+                with Image.open(photo) as image:
+                    width, height = image.size
+                if width >= 700 and height >= 700:
+                    qualified.append((width * height, photo))
+            photos = [p for _, p in sorted(qualified, reverse=True)]
+        except Exception as exc:
+            log.warning("Contrôle qualité portraits impossible : %s", exc)
     if not photos:
         return None
     return photos[video_id % len(photos)].read_bytes()
@@ -423,15 +457,34 @@ def _html_old(cfg: Config, video_id: int, title: str, subject_uri: str, is_card:
 
 def _render_html(html: str, out_jpg: Path) -> bool:
     try:
+        from PIL import Image
         from playwright.sync_api import sync_playwright
+        masters = out_jpg.parent / "masters"
+        masters.mkdir(parents=True, exist_ok=True)
+        master = masters / out_jpg.name
         with sync_playwright() as p:
             browser = p.chromium.launch(args=["--no-sandbox", "--disable-dev-shm-usage"])
-            page = browser.new_page(viewport={"width": W, "height": H})
+            # Master réellement UHD (3840×2160), résolution désormais recommandée
+            # par YouTube. Le fichier API final reste sous sa limite stricte de 2 Mio.
+            context = browser.new_context(
+                viewport={"width": W, "height": H},
+                device_scale_factor=3,
+            )
+            page = context.new_page()
             page.set_content(html)
             page.wait_for_timeout(400)  # chargement des polices
-            page.screenshot(path=str(out_jpg), type="jpeg", quality=90)
+            page.screenshot(path=str(master), type="jpeg", quality=95)
+            context.close()
             browser.close()
-        return out_jpg.exists()
+        with Image.open(master) as image:
+            final = image.convert("RGB")
+            for quality in (92, 88, 84, 80, 76, 72, 68, 64, 60, 56, 52):
+                final.save(out_jpg, "JPEG", quality=quality, optimize=True, progressive=True)
+                if out_jpg.stat().st_size <= 1_900_000:
+                    break
+        if out_jpg.stat().st_size > 2_000_000:
+            raise ValueError("miniature UHD impossible à compresser sous 2 Mio")
+        return out_jpg.exists() and master.exists()
     except Exception as exc:
         log.error("Rendu Chrome impossible : %s", exc)
         return False
@@ -507,13 +560,17 @@ def thumbs_pending(cfg: Config, db: Database, limit: int = 0) -> int:
     # Covers pour TOUTES les vidéos, Shorts compris (décision de Michel :
     # c'est la cover qui fait cliquer dans la recherche et sur la page chaîne).
     rows = db.conn.execute(
-        "SELECT id FROM videos WHERE state = 'READY' AND thumb_path IS NULL "
+        "SELECT id, thumb_path FROM videos WHERE state = 'READY' "
         "ORDER BY CASE WHEN duration_s BETWEEN 30 AND 180 THEN 0 ELSE 1 END, "
         "duration_s DESC").fetchall()
     done = 0
     for r in rows:
         if limit and done >= limit:
             break
+        if valid_thumbnail(r["thumb_path"]):
+            continue
+        if r["thumb_path"]:
+            db.update_fields(r["id"], thumb_path=None)
         if generate_thumb(cfg, db, r["id"]):
             done += 1
     return done

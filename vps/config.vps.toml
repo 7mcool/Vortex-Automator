@@ -8,8 +8,10 @@ client_secret_file = '/app/secrets/client_secret.json'
 token_file = '/app/secrets/youtube_token.json'
 
 [publish]
-hours = [9, 12, 15, 18, 21]
-daily_limit = 5
+facebook_publish = true
+instagram_publish = true
+hours = [0, 3, 6, 9, 12, 15, 18, 21]
+daily_limit = 8
 timezone = "Africa/Porto-Novo"
 category_id = "27"
 language = "fr"

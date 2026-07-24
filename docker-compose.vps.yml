@@ -4,18 +4,29 @@
 #   docker compose -f docker-compose.vps.yml run --rm vortex vps/daily.sh   # routine complète
 #   docker compose -f docker-compose.vps.yml run --rm vortex python -m vortex status
 services:
+  bgutil-provider:
+    image: brainicism/bgutil-ytdlp-pot-provider:latest
+    restart: unless-stopped
+    mem_limit: 256m
+    cpus: 0.25
+
   vortex:
     build: .
     image: vortex-automator:latest
     environment:
       - TZ=Africa/Porto-Novo
       - PYTHONIOENCODING=utf-8
+    depends_on:
+      - bgutil-provider
     volumes:
-      - ./config.toml:/app/config.toml:ro
+      - ./vps/config.vps.toml:/app/config.toml:ro
       - ./.env:/app/.env:ro
       - ./secrets:/app/secrets
       - ./data:/app/data
       - ./videos:/app/videos
+      - ./assets:/app/assets
+      - ./vortex:/app/vortex:ro
+      - ./vps:/app/vps:ro
       - ./cache:/root/.cache
     mem_limit: 4g
     cpus: 2.0
@@ -30,9 +41,11 @@ services:
     ports:
       - "8787:8787"
     volumes:
-      - ./config.toml:/app/config.toml:ro
+      - ./vps/config.vps.toml:/app/config.toml:ro
       - ./.env:/app/.env:ro
       - ./secrets:/app/secrets:ro
       - ./data:/app/data   # rw : SQLite en mode WAL écrit ses fichiers de travail
+      - ./assets:/app/assets:ro
+      - ./vortex:/app/vortex:ro
     mem_limit: 256m
     cpus: 0.3

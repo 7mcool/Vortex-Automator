@@ -9,13 +9,14 @@ sh vps/fetch_tiktok.sh /app/videos/hedjav
 
 # 1bis. Chaînes YouTube sources (Phase 5) + découpage intelligent d'UNE
 # longue vidéo par jour (3-8 extraits alimentent la file de publication)
-sh vps/fetch_youtube.sh /app/videos/sources 2
+sh vps/fetch_youtube.sh /app/videos/sources 1
 python -m vortex clip
 
 # 2. Pipeline complet
 python -m vortex scan
 python -m vortex retry
 python -m vortex detect-text -n 30
+python -m vortex detect-speaker -n 30    # lit le nom du pasteur à l'écran (hedjav)
 python -m vortex transcribe -n 8
 python -m vortex prepare -n 10
 python -m vortex render -n 8

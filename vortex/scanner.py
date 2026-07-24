@@ -128,9 +128,10 @@ def scan(cfg: Config, db: Database) -> dict:
         try:
             stats["seen"] += 1
             stat = path.stat()
-            # Fichier probablement en cours de téléchargement (4K Tokkit actif) :
-            # on l'ignore pour ce scan, il sera repris au suivant.
-            if time.time() - stat.st_mtime < 120:
+            # yt-dlp/ffmpeg écrivent dans un fichier temporaire puis renomment le
+            # MP4 terminé. Cinq secondes suffisent ici ; l'ancien délai de 120 s
+            # faisait rater tous les extraits créés juste avant ce scan quotidien.
+            if time.time() - stat.st_mtime < 5:
                 stats["in_progress"] += 1
                 continue
 

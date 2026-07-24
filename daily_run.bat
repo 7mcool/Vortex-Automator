@@ -9,6 +9,9 @@ set PYTHONIOENCODING=utf-8
 
 echo [%date% %time%] === DEBUT ROUTINE QUOTIDIENNE === >> data\logs\daily.log
 
+REM 0. Recuperer depuis /streams uniquement les sermons >=20 min et les envoyer au VPS
+call sync_youtube_sources.bat >> data\logs\daily.log 2>&1
+
 REM 1. Detecter les nouvelles videos (ignore les telechargements en cours)
 python -m vortex scan >> data\logs\daily.log 2>&1
 
@@ -16,15 +19,21 @@ REM 2. Remettre en file les echecs recuperables (disque rebranche...)
 python -m vortex retry >> data\logs\daily.log 2>&1
 
 REM 3. Transcrire et preparer un lot (garde ~2 jours d'avance)
+python -m vortex detect-text -n 30 >> data\logs\daily.log 2>&1
+python -m vortex detect-speaker -n 30 >> data\logs\daily.log 2>&1
 python -m vortex transcribe -n 8 >> data\logs\daily.log 2>&1
 python -m vortex prepare -n 10 >> data\logs\daily.log 2>&1
 
-REM 4. Publier 5 videos (privees, programmees aux creneaux du jour suivant)
+REM 4. Rendu et miniature obligatoires avant toute publication
+python -m vortex render -n 8 >> data\logs\daily.log 2>&1
+python -m vortex thumbs -n 8 >> data\logs\daily.log 2>&1
+
+REM 5. Publier 5 videos (privees, programmees aux creneaux du jour suivant)
 python -m vortex publish -n 5 --live >> data\logs\daily.log 2>&1
 
-REM 5. Engagement : constater les publications, commenter, repondre
+REM 6. Engagement : constater les publications, commenter, repondre
 python -m vortex engage >> data\logs\daily.log 2>&1
 
-REM 6. Etat final
+REM 7. Etat final
 python -m vortex status >> data\logs\daily.log 2>&1
 echo [%date% %time%] === FIN ROUTINE === >> data\logs\daily.log

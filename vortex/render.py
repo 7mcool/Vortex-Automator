@@ -128,7 +128,8 @@ def _fontname() -> str:
     return "Arial" if Path(r"C:\Windows\Fonts\arial.ttf").exists() else "DejaVu Sans"
 
 
-def _pop_events(words_file: Path, duration: float, fs_pop: int = 0) -> list[str]:
+def _pop_events(words_file: Path, duration: float, fs_pop: int = 0,
+                start_after: float = 0.0) -> list[str]:
     """Style word-pop (Hormozi) : 1-2 mots géants qui apparaissent au moment
     où ils sont prononcés, avec un petit rebond d'échelle."""
     try:
@@ -147,6 +148,10 @@ def _pop_events(words_file: Path, duration: float, fs_pop: int = 0) -> list[str]
         end = max(group[-1]["e"], start + 0.28)
         if i + len(group) < len(words):
             end = min(end + 0.12, words[i + len(group)]["s"])
+        if end <= start_after:
+            i += len(group)
+            continue
+        start = max(start, start_after)
         txt = " ".join(w["w"].upper() for w in group)
         fs_tag = f"{{\\fs{fs_pop}}}" if fs_pop else ""
         pop = r"{\fad(40,30)\t(0,110,\fscx118\fscy118)\t(110,220,\fscx100\fscy100)}"
@@ -155,7 +160,8 @@ def _pop_events(words_file: Path, duration: float, fs_pop: int = 0) -> list[str]
     return out
 
 
-def _build_events(words_file: Path, duration: float, max_chars: int, accent_hex: str) -> list[str]:
+def _build_events(words_file: Path, duration: float, max_chars: int, accent_hex: str,
+                  start_after: float = 0.0) -> list[str]:
     """Style « build » : la ligne se construit mot après mot (machine à écrire),
     le dernier mot arrivé est en couleur d'accent."""
     try:
@@ -181,6 +187,9 @@ def _build_events(words_file: Path, duration: float, max_chars: int, accent_hex:
         for i in range(len(ch)):
             start = ch[i]["s"]
             end = ch[i + 1]["s"] if i + 1 < len(ch) else max(ch[i]["e"], start + 0.3)
+            if end <= start_after:
+                continue
+            start = max(start, start_after)
             parts = [w["w"].upper() for w in ch[: i + 1]]
             text = white + " ".join(parts[:-1])
             text += (" " if len(parts) > 1 else "") + accent + parts[-1]
@@ -188,7 +197,8 @@ def _build_events(words_file: Path, duration: float, max_chars: int, accent_hex:
     return out
 
 
-def _karaoke_events(words_file: Path, duration: float, max_chars: int) -> list[str]:
+def _karaoke_events(words_file: Path, duration: float, max_chars: int,
+                    start_after: float = 0.0) -> list[str]:
     """Chunks courts, mot courant illuminé via \\k (style Submagic).
     max_chars est calculé depuis la largeur réelle de la vidéo."""
     try:
@@ -213,6 +223,9 @@ def _karaoke_events(words_file: Path, duration: float, max_chars: int) -> list[s
     out = []
     for ch in events:
         start, end = ch[0]["s"], max(ch[-1]["e"], ch[0]["s"] + 0.3)
+        if end <= start_after:
+            continue
+        start = max(start, start_after)
         parts = []
         for w in ch:
             k_cs = max(int((w["e"] - w["s"]) * 100), 8)
@@ -431,12 +444,22 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     # on ajoutait le karaoké PAR-DESSUS les sous-titres existants → double sous-titre
     # sur presque toutes les vidéos (retour Michel).
     if words_file and words_file.exists() and not lifted:
+        caption_after = 5.3 if not skip_hook else 0.0
         if v["caption_mode"] == "pop":
-            events += _pop_events(words_file, duration, fs_pop=int(height / 15))
+            events += _pop_events(
+                words_file, duration, fs_pop=int(height / 15),
+                start_after=caption_after,
+            )
         elif v["caption_mode"] == "build":
-            events += _build_events(words_file, duration, kara_chars, v["kara"])
+            events += _build_events(
+                words_file, duration, kara_chars, v["kara"],
+                start_after=caption_after,
+            )
         else:
-            events += _karaoke_events(words_file, duration, kara_chars)
+            events += _karaoke_events(
+                words_file, duration, kara_chars,
+                start_after=caption_after,
+            )
 
     return header + "\n".join(events) + "\n"
 
@@ -458,12 +481,24 @@ def render_video(cfg: Config, db: Database, video_id: int) -> bool:
 
     has_text = row["has_text"] if "has_text" in row.keys() else None
     src_w, src_h = row["width"] or 576, row["height"] or 1024
+
+    # HABILLAGE LÉGER pour les vidéos hedjav : ce sont des clips créateur DÉJÀ montés
+    # et étalonnés par OpusClip (retour Michel : « certains sont déjà parfaits, pas
+    # besoin d'habillage »). On leur ajoute UNIQUEMENT l'accroche + le filigrane + le
+    # CTA (fichier .ass), SANS ré-étalonner ni suréchantillonner : ré-appliquer denoise/
+    # grade/upscale sur une image déjà finie est inutile, lent (~10 min/clip en 2K sur
+    # ce VPS) et peut la dégrader. Les vidéos YouTube BRUTES (Clipper) gardent, elles,
+    # l'étalonnage cinéma complet + la sortie 2K ci-dessous.
+    light = (row["name"] or "").startswith("hedjav")
+
     # Qualité maximale raisonnable : sortie 2K (verticale 1440x2560, horizontale
     # 2560x1440). Dès 1440p, YouTube sert un codec bien meilleur (VP9/AV1) qu'en
     # 1080p — c'est le principal levier de netteté perçue. La vraie 4K coûterait
     # des heures d'encodage par vidéo sur un serveur 2 cœurs pour un gain marginal
     # (surchargeable via cfg.render_width). Jamais de downscale.
-    target_w = int(getattr(cfg, "render_width", 0)) or (1440 if src_h > src_w else 2560)
+    # En mode léger : 1080p (pas d'upscale coûteux d'une source déjà propre).
+    default_w = (1080 if src_h > src_w else 1920) if light else (1440 if src_h > src_w else 2560)
+    target_w = int(getattr(cfg, "render_width", 0)) or default_w
     out_w = max(src_w, target_w) // 2 * 2
     out_h = int(src_h * out_w / src_w) // 2 * 2
 
@@ -492,21 +527,33 @@ def render_video(cfg: Config, db: Database, video_id: int) -> bool:
                   # sous-titres incrustés) → garantit 0 double même si l'OCR rate.
                   lifted=(has_text in ("texte", "douteux")
                           or (row["name"] or "").startswith("hedjav")),
-                  video_id=video_id, hook_center=hook_center),
+                  video_id=video_id, luminous=True, hook_center=hook_center),
         encoding="utf-8")
 
     def _ffpath(p: str) -> str:
         return p.replace("\\", "/").replace(":", r"\:")
 
-    # Vidéo PLEIN ÉCRAN, étalonnage CINÉMATIQUE + textes par-dessus (pas de bandes).
-    vf = (
-        f"scale={out_w}:{out_h}:flags=lanczos,"
-        f"{CINEMA_GRADE},"
-        f"ass='{_ffpath(str(ass_file))}'"
-    )
-    cmd = [find_ffmpeg(), "-v", "error", "-i", str(src), "-vf", vf,
-           "-c:v", "libx264", "-preset", "fast", "-crf", "18",
-           "-c:a", "copy", "-movflags", "+faststart", "-y", str(out)]
+    # Vidéo PLEIN ÉCRAN + textes par-dessus (pas de bandes).
+    # - hedjav (léger) : pas d'étalonnage (déjà fait par OpusClip), encodage rapide.
+    # - YouTube brut (Clipper) : étalonnage CINÉMATIQUE complet + qualité maximale.
+    if light:
+        vf = f"scale={out_w}:{out_h}:flags=lanczos,ass='{_ffpath(str(ass_file))}'"
+        preset, crf = "veryfast", "20"
+    else:
+        vf = (
+            f"scale={out_w}:{out_h}:flags=lanczos,"
+            f"{CINEMA_GRADE},"
+            f"ass='{_ffpath(str(ass_file))}'"
+        )
+        preset, crf = "fast", "18"
+    # Parole cohérente sur YouTube/Instagram/Facebook : l'ancien `-c:a copy`
+    # conservait des niveaux allant d'environ -33 LUFS à l'écrêtage. Une passe
+    # loudnorm + AAC 192 kbit/s donne un niveau social propre et reproductible.
+    af = "loudnorm=I=-14:LRA=11:TP=-1.5"
+    cmd = [find_ffmpeg(), "-v", "error", "-i", str(src), "-vf", vf, "-af", af,
+           "-c:v", "libx264", "-preset", preset, "-crf", crf,
+           "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+           "-movflags", "+faststart", "-y", str(out)]
     try:
         subprocess.run(cmd, capture_output=True, timeout=7200, check=True)
     except subprocess.CalledProcessError as exc:
@@ -531,13 +578,17 @@ def render_pending(cfg: Config, db: Database, limit: int = 0) -> int:
         db.conn.execute("ALTER TABLE videos ADD COLUMN render_path TEXT")
         db.conn.commit()
     rows = db.conn.execute(
-        "SELECT id FROM videos WHERE state = 'READY' AND render_path IS NULL "
+        "SELECT id, render_path FROM videos WHERE state = 'READY' "
         "ORDER BY CASE WHEN duration_s BETWEEN 30 AND 180 THEN 0 ELSE 1 END, "
         "duration_s DESC").fetchall()
     done = 0
     for r in rows:
         if limit and done >= limit:
             break
+        if r["render_path"] and Path(r["render_path"]).is_file():
+            continue
+        if r["render_path"]:
+            db.update_fields(r["id"], render_path=None)
         if render_video(cfg, db, r["id"]):
             done += 1
     return done
