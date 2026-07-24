@@ -1,0 +1,36 @@
+# ============================= VORTEX AUTOMATOR =============================
+# Heures UTC (Cotonou = UTC+1)
+
+# Pipeline principal — toutes les 4 heures (6x/jour au lieu de 1x)
+# flock -n évite le chevauchement si un run dépasse 4h (improbable avec -n 8)
+15 */4 * * * flock -n /tmp/vortex-pipeline.lock -c "cd /opt/vortex/repo && docker compose -f docker-compose.vps.yml run --rm vortex sh vps/daily.sh" >> /opt/vortex/daily.log 2>&1
+
+# Scan rapide — toutes les 2 heures (découvre vite les nouveaux TikTok)
+30 */2 * * * flock -n /tmp/vortex-scan.lock -c "cd /opt/vortex/repo && docker compose -f docker-compose.vps.yml run --rm vortex sh vps/fetch_tiktok.sh /app/videos/hedjav && docker compose -f docker-compose.vps.yml run --rm vortex python -m vortex scan && docker compose -f docker-compose.vps.yml run --rm vortex python -m vortex retry" >> /opt/vortex/repo/data/logs/vortex.log 2>&1
+
+# Stories — 5x/jour (8h, 11h, 14h, 17h, 20h UTC)
+0 8 * * * cd /opt/vortex/repo && docker compose -f docker-compose.vps.yml run --rm vortex python -m vortex story >> /opt/vortex/repo/data/logs/story.log 2>&1
+0 11 * * * cd /opt/vortex/repo && docker compose -f docker-compose.vps.yml run --rm vortex python -m vortex story >> /opt/vortex/repo/data/logs/story.log 2>&1
+0 14 * * * cd /opt/vortex/repo && docker compose -f docker-compose.vps.yml run --rm vortex python -m vortex story >> /opt/vortex/repo/data/logs/story.log 2>&1
+0 17 * * * cd /opt/vortex/repo && docker compose -f docker-compose.vps.yml run --rm vortex python -m vortex story >> /opt/vortex/repo/data/logs/story.log 2>&1
+0 20 * * * cd /opt/vortex/repo && docker compose -f docker-compose.vps.yml run --rm vortex python -m vortex story >> /opt/vortex/repo/data/logs/story.log 2>&1
+
+# Backfill social — 1x/jour à 9h30 UTC
+30 9 * * * cd /opt/vortex/repo && docker compose -f docker-compose.vps.yml run --rm vortex python -m vortex backfill-social -n 8 >> /opt/vortex/repo/data/logs/backfill.log 2>&1
+
+# --- MAINTENANCE ---
+
+# Token Meta — renouvellement hebdomadaire (dimanche 4h UTC)
+0 4 * * 0 /opt/vortex/repo/vps/refresh_meta_token.sh >> /opt/vortex/repo/data/logs/meta_refresh.log 2>&1
+
+# Garde-fou image Docker — toutes les heures
+17 * * * * /opt/vortex/repo/vps/ensure_up.sh
+
+# Nettoyage Docker — quotidien 5h30 UTC
+30 5 * * * /opt/vortex/repo/vps/cleanup_disk.sh >> /opt/vortex/repo/data/logs/cleanup.log 2>&1
+
+# Libération espace vidéo — toutes les 3 heures
+45 */3 * * * /opt/vortex/repo/vps/free_space.sh >> /opt/vortex/repo/data/logs/free_space.log 2>&1
+
+# Healthcheck + alerte Telegram — toutes les 6 heures
+0 */6 * * * /opt/vortex/repo/vps/healthcheck.sh
