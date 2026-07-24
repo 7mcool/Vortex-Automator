@@ -114,10 +114,10 @@ foreach ($chan in $channels) {
 }
 
 if ($StartRemoteClip) {
-    Write-Host "Démarrage du découpage sur le VPS..."
-    & ssh -i $IdentityFile -o IdentitiesOnly=yes "$VpsUser@$VpsHost" `
-        "cd /opt/vortex/repo && docker compose -f docker-compose.vps.yml run --rm --no-deps vortex python -m vortex clip"
-    if ($LASTEXITCODE -ne 0) { throw "Le découpage distant a échoué" }
+    Write-Host "Demarrage du decoupage sur le VPS..."
+    $remoteCmd = "cd /opt/vortex/repo; docker compose -f docker-compose.vps.yml run --rm --no-deps vortex python -m vortex clip"
+    ssh -i $IdentityFile -o IdentitiesOnly=yes "$VpsUser@$VpsHost" $remoteCmd
+    if ($LASTEXITCODE -ne 0) { throw "Le decoupage distant a echoue (code $LASTEXITCODE)" }
 }
 
-Write-Host "Synchronisation YouTube terminée."
+Write-Host "Synchronisation YouTube terminee."
