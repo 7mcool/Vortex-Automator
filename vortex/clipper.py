@@ -466,6 +466,27 @@ def _probe_duration(path: str | Path) -> float | None:
         return None
 
 
+def _sans_chevauchement(clips: list[dict], marge: float = 30.0) -> list[dict]:
+    """Écarte les extraits qui se recouvrent, sur une liste déjà triée par début.
+
+    L'IA propose parfois deux passages quasi identiques : le sermon du 21/07 a
+    produit deux extraits distants de 36 secondes, donc largement superposés.
+    Publier les deux revient à sortir deux fois le même message, ce que YouTube
+    traite comme du contenu répétitif. Le premier passage l'emporte ; `marge`
+    tolère les enchaînements serrés mais réellement distincts.
+    """
+    gardes: list[dict] = []
+    for clip in clips:
+        if gardes and clip["start"] < gardes[-1]["end"] - marge:
+            log.info(
+                "Extrait ignoré (chevauche le précédent) : %.0fs-%.0fs",
+                clip["start"], clip["end"],
+            )
+            continue
+        gardes.append(clip)
+    return gardes
+
+
 def _ensure_table(db: Database) -> None:
     db.conn.executescript("""
         CREATE TABLE IF NOT EXISTS clip_sources (
@@ -505,6 +526,7 @@ def process_one_source(cfg: Config, db: Database) -> int:
     # Ordre CHRONOLOGIQUE : Partie 1 = le passage le plus tôt dans le sermon, etc.
     # → une vraie série « Partie 1/2/3 » qui suit le déroulé de la prédication.
     clips.sort(key=lambda c: c["start"])
+    clips = _sans_chevauchement(clips)
     total = len(clips)
     log.info("%d extraits proposés par DeepSeek", total)
 
@@ -586,11 +608,15 @@ def process_one_source(cfg: Config, db: Database) -> int:
         log.error("Aucun extrait valide pour %s — source conservée pour reprise", src.name)
         return 0
     if not all_complete or made != total:
+        # Un montage partiel est archivé quand même. Rejouer la source ne
+        # reprend pas les extraits manquants : l'IA resélectionne d'autres
+        # passages et produit un second jeu qui recouvre le premier. Le sermon
+        # du 21/07 est ainsi sorti en douze extraits au lieu de six, avec des
+        # accroches en double — exactement ce que YouTube pénalise.
         log.error(
-            "Montage partiel pour %s (%d/%d) — source conservée pour compléter",
+            "Montage partiel pour %s (%d/%d) — archivé en l'état, pas de reprise",
             src.name, made, total,
         )
-        return made
 
     # Constitue automatiquement une bibliothèque HD depuis la vidéo officielle.
     # Le nom du pasteur doit figurer dans le titre source ; sinon aucune image
