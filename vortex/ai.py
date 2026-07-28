@@ -47,6 +47,47 @@ def _parse_json_obj(content: str) -> dict:
             pass
     return {}
 
+
+# Ambiances visuelles autorisées pour la miniature (voir "thumb_theme").
+THEMES_VISUELS = {
+    "combat", "guerison", "priere", "prosperite", "avertissement",
+    "esperance", "mort", "famille", "deliverance", "enseignement",
+}
+# Mots de liaison : une accroche qui finit dessus est un fragment coupé.
+_MOTS_SUSPENDUS = {
+    "et", "de", "des", "du", "la", "le", "les", "un", "une", "à", "au", "aux",
+    "en", "ce", "cet", "cette", "qui", "que", "qu", "d", "l", "ou", "ni",
+    "pour", "par", "sur", "dans", "avec", "sans", "mais", "donc", "car",
+    "son", "sa", "ses", "mon", "ma", "mes", "ton", "ta", "tes", "est", "sont",
+}
+
+
+def _clean_thumb_title(value) -> str:
+    """Accepte l'accroche seulement si elle se lit seule.
+
+    Le retour de Michel (24/07) portait sur des miniatures au « texte
+    incompréhensible » : c'étaient des phrases coupées en plein milieu. Une
+    accroche suspendue sur un mot de liaison, trop longue ou réduite à un ou
+    deux mots est donc rejetée — le repli local reprend alors la main.
+    """
+    text = str(value or "").strip().strip("\"'«».,;:!?-—")
+    if not text:
+        return ""
+    mots = text.split()
+    # Le prompt demande 38 caractères ; on tolère jusqu'à 46 pour ne pas jeter
+    # une bonne accroche qui dépasse de peu (la police s'adapte à l'affichage).
+    if not 3 <= len(mots) <= 6 or len(text) > 46:
+        return ""
+    if mots[-1].lower().strip("'") in _MOTS_SUSPENDUS:
+        return ""
+    return text
+
+
+def _clean_theme(value) -> str:
+    theme = str(value or "").strip().lower()
+    return theme if theme in THEMES_VISUELS else ""
+
+
 PROMPT = """Tu es l'éditeur YouTube de la chaîne « {channel} », dédiée aux prédications et \
 à la motivation chrétienne (en français, public francophone d'Afrique de l'Ouest).
 
@@ -76,8 +117,20 @@ et partager. Termine par 3 à 5 hashtags pertinents (#foi #motivation…)
 - "tags" : liste de 12 à 15 mots-clés français pertinents (2-3 mots max chacun, total < 450 caractères)
 - "hook" : la phrase la plus percutante du message, corrigée, max 100 caractères
 - "speaker" : le nom de l'orateur SI clairement identifié, sinon chaîne vide ""
-- "thumb_title" : titre ULTRA-COURT pour la miniature (4 à 6 mots, choc, MAJUSCULES naturelles, \
-sans ponctuation finale) — ex : « Les ennemis de la foi »
+- "thumb_title" : l'accroche de la miniature. C'est le texte que le spectateur lit AVANT de \
+cliquer : il décide seul du clic. Règles impératives :
+  * 3 à 6 mots, 38 caractères maximum ;
+  * une idée COMPLÈTE et compréhensible seule, jamais un fragment de phrase coupé ;
+  * il doit créer une tension : une promesse, un danger, un secret, un chiffre, un renversement ;
+  * fidèle au contenu réel de la vidéo — aucune promesse que le message ne tient pas ;
+  * pas de nom propre incertain, pas d'emoji, pas de ponctuation finale, pas de hashtag.
+  BON : « Ce péché bloque ta prière », « Il est mort 20 minutes », « Dieu refuse ce jeûne », \
+« L'erreur qui ruine ta foi »
+  MAUVAIS : « Les ennemis de la foi » (plat, aucune tension), « Comment donner sans rater sa » \
+(fragment coupé), « Message important pour toi » (creux, vrai pour tout)
+- "thumb_theme" : UN SEUL mot-clé décrivant l'ambiance visuelle qui colle au message, choisi \
+dans cette liste exacte : combat, guerison, priere, prosperite, avertissement, esperance, \
+mort, famille, deliverance, enseignement
 
 Réponds UNIQUEMENT avec le JSON."""
 
@@ -145,7 +198,11 @@ def generate_metadata(channel: str, speakers: list[str], caption: str, transcrip
                 "tags": tags[:15],
                 "hook": hook[:100],
                 "speaker": str(data.get("speaker", "")).strip(),
-                "thumb_title": str(data.get("thumb_title", "")).strip()[:60],
+                # Une accroche trop longue serait tronquée à l'affichage et
+                # redeviendrait le fragment illisible qu'on cherche à éviter :
+                # mieux vaut la rejeter et laisser le repli local trancher.
+                "thumb_title": _clean_thumb_title(data.get("thumb_title")),
+                "thumb_theme": _clean_theme(data.get("thumb_theme")),
             }
         except (urllib.error.URLError, urllib.error.HTTPError, KeyError,
                 IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:

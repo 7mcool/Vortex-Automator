@@ -102,33 +102,74 @@ def build_title(cfg: Config, video_id: int, caption: str, transcript: str, is_sh
     return title[:100]  # limite dure de l'API YouTube
 
 
+# Un mot de liaison ou un pronom en fin d'accroche signale une phrase coupée en
+# plein milieu (« … RÉVÈLE COMMENT IL »).
+_MOTS_SUSPENDUS = {
+    "et", "de", "des", "du", "la", "le", "les", "un", "une", "à", "au", "aux",
+    "en", "ce", "cet", "cette", "qui", "que", "qu", "d", "l", "ou", "ni",
+    "pour", "par", "sur", "dans", "avec", "sans", "mais", "donc", "car",
+    "contre", "vers", "chez", "entre", "depuis", "apres", "après", "avant",
+    "son", "sa", "ses", "mon", "ma", "mes", "ton", "ta", "tes", "est", "sont",
+    "a", "ont", "plus", "très", "tout", "toute", "comment", "pourquoi",
+    "il", "elle", "ils", "elles", "je", "tu", "nous", "vous", "on", "se",
+    "ne", "y", "lui", "leur", "me", "te", "s", "n", "quand", "si",
+}
+# Amorces creuses : elles mangent des mots sans rien promettre au spectateur.
+_AMORCES = re.compile(
+    r"^(voici|voilà|découvre[zs]?|regarde[zs]?|écoute[zs]?|attention|"
+    r"à méditer|message|extrait|le message de|la parole de)\b[\s:,-]*",
+    re.IGNORECASE,
+)
+
+
+def _accroche_lisible(phrase: str) -> str:
+    """Réduit une phrase à une accroche qui se lit seule, ou renvoie ''."""
+    phrase = _AMORCES.sub("", phrase.strip())
+    phrase = re.sub(r"\s+", " ", phrase).strip(" .,-—:;#\"'«»")
+    # Une ponctuation isolée (« MIRACLE : ») compte sinon comme un mot et se
+    # retrouve affichée en bout d'accroche.
+    mots = [m for m in phrase.split() if any(c.isalnum() for c in m)]
+    if len(mots) > 6:
+        mots = mots[:6]
+    # Reculer tant que l'accroche reste suspendue sur un mot de liaison.
+    while len(mots) > 3 and mots[-1].lower().strip("'") in _MOTS_SUSPENDUS:
+        mots.pop()
+    if len(mots) < 3 or mots[-1].lower().strip("'") in _MOTS_SUSPENDUS:
+        return ""
+    accroche = " ".join(mots)
+    # La miniature réduit la police en fonction du mot le plus long : une
+    # accroche complète un peu longue reste lisible, contrairement à un
+    # fragment court mais coupé. On accepte donc jusqu'à 46 caractères.
+    return accroche if len(accroche) <= 46 else ""
+
+
 def derive_thumb_title(title: str, hook: str = "") -> str:
-    """Phrase choc COURTE (4-6 mots) pour l'accroche à l'écran façon OpusClip,
-    dérivée localement quand l'IA n'en fournit pas. Le hook affiché ne doit
-    JAMAIS être le titre long (retour Michel : « le texte de l'extrait 1 est bad »)."""
-    base = (hook or title or "").strip()
-    # retire une amorce du type « À méditer : » / « Écoute bien : »
-    if ":" in base:
-        head, tail = base.split(":", 1)
-        if len(head) <= 14 and tail.strip():
-            base = tail.strip()
-    # coupe à la 1re ponctuation forte (garde une clause nette)
-    for sep in ("!", "?", ".", ":", ";", "—", ",", "-"):
-        i = base.find(sep)
-        if 12 <= i <= 42:
-            base = base[:i]
-            break
-    base = re.sub(r"\s+", " ", base).strip(" .,-—:;#")
-    words = base.split()
-    if len(words) > 6:
-        words = words[:6]
-    # évite de finir sur un mot de liaison (« … ET LES »)
-    _trailing = {"et", "de", "des", "du", "la", "le", "les", "un", "une", "à",
-                 "en", "ce", "qui", "que", "d", "l", "au", "aux", "ou", "ni", "pour"}
-    while len(words) > 2 and words[-1].lower().strip("'") in _trailing:
-        words.pop()
-    base = " ".join(words)[:42].strip()
-    return base.upper() if base else ""
+    """Accroche COURTE pour la miniature, quand l'IA n'en fournit pas d'utilisable.
+
+    Michel a rejeté des miniatures au « texte incompréhensible » (24/07) : le
+    découpage à six mots tombait en plein milieu d'une phrase. On teste donc
+    plusieurs clauses complètes et on ne garde que celles qui se lisent seules ;
+    à défaut, on préfère ne rien afficher plutôt qu'un fragment.
+    """
+    for source in (hook, title):
+        base = (source or "").strip()
+        if not base:
+            continue
+        # Retire une amorce du type « À méditer : » / « Écoute bien : ».
+        if ":" in base:
+            head, tail = base.split(":", 1)
+            if len(head) <= 14 and tail.strip():
+                base = tail.strip()
+        # Les clauses naturelles d'abord, la phrase entière en dernier recours.
+        # Le tiret ne sépare que s'il est isolé : « Jésus-Christ » reste entier.
+        candidats = [c for c in re.split(r"[!?.;:,—–]|\s-\s", base) if c.strip()]
+        candidats.append(base)
+        retenues = [a for a in (_accroche_lisible(c) for c in candidats) if a]
+        if retenues:
+            # La clause la plus fournie porte l'information ; une clause courte
+            # comme « En plein live » ne dit rien du message.
+            return max(retenues, key=lambda a: len(a.split())).upper()
+    return ""
 
 
 def build_description(cfg: Config, caption: str, transcript: str, video_id: int) -> str:
@@ -252,13 +293,17 @@ def prepare_video(cfg: Config, db: Database, video_id: int) -> bool:
         description = generated["description"]
         tags = generated["tags"]
         cols = [r[1] for r in db.conn.execute("PRAGMA table_info(videos)")]
-        for col in ("thumb_title", "speaker"):
+        for col in ("thumb_title", "speaker", "thumb_theme"):
             if col not in cols:
                 db.conn.execute(f"ALTER TABLE videos ADD COLUMN {col} TEXT")
                 db.conn.commit()
         thumb = generated.get("thumb_title") or derive_thumb_title(title, generated.get("hook", ""))
         if thumb:
             db.update_fields(video_id, thumb_title=thumb)
+        # Ambiance visuelle du fond : sans elle, la miniature tirait un décor au
+        # hasard, d'où les « fonds incohérents » signalés par Michel le 24/07.
+        if generated.get("thumb_theme"):
+            db.update_fields(video_id, thumb_theme=generated["thumb_theme"])
         if generated.get("speaker"):
             db.update_fields(video_id, speaker=generated["speaker"])
     else:

@@ -193,24 +193,55 @@ COVER_ACCENTS = [  # (accent, halo r,g,b) — VARIÉS par vidéo (fini le tout-o
 ]
 
 
-def _fond_uri(video_id: int) -> str:
+# Ambiance du message → familles de décors qui lui correspondent. Michel a
+# rejeté des miniatures au « fond incohérent » (24/07) : le décor était tiré au
+# hasard, sans rapport avec le sujet. Le thème vient de l'IA (`thumb_theme`).
+FONDS_PAR_THEME = {
+    "combat":        ("nuages-dramatiques", "ciel-etoile"),
+    "avertissement": ("nuages-dramatiques", "ciel-etoile"),
+    "mort":          ("lumiere-tunnel", "nuages-dramatiques"),
+    "deliverance":   ("lumiere-tunnel", "rayons-celestes"),
+    "guerison":      ("lumiere-doree", "rayons-celestes"),
+    "priere":        ("rayons-celestes", "lumiere-tunnel"),
+    "esperance":     ("rayons-celestes", "lumiere-doree"),
+    "prosperite":    ("abstrait-or", "lumiere-doree"),
+    "famille":       ("marbre-clair", "lumiere-doree"),
+    "enseignement":  ("marbre-clair", "abstrait-or"),
+}
+
+
+def _fond_uri(video_id: int, theme: str = "") -> str:
+    """Décor de la miniature, choisi selon l'ambiance du message.
+
+    À thème égal, `video_id` départage : deux vidéos du même sujet ne
+    reçoivent pas le même décor, ce qui évite l'effet « produit en masse ».
+    """
     fonds_dir = ASSETS_DIR / "fonds"
     if not fonds_dir.is_dir():
         return ""
-    fonds = sorted(p for p in fonds_dir.iterdir() if p.suffix.lower() in (".jpg", ".jpeg", ".png"))
+    fonds = sorted(p for p in fonds_dir.iterdir()
+                   if p.suffix.lower() in (".jpg", ".jpeg", ".png"))
     if not fonds:
         return ""
+    prefixes = FONDS_PAR_THEME.get((theme or "").lower())
+    if prefixes:
+        accordes = [p for p in fonds if p.name.startswith(prefixes)]
+        # Un thème sans décor installé retombe sur la bibliothèque complète
+        # plutôt que de faire échouer la miniature.
+        if accordes:
+            fonds = accordes
     return _b64(fonds[video_id % len(fonds)].read_bytes(), "image/jpeg")
 
 
-def _html(cfg: Config, video_id: int, title: str, subject_uri: str, is_card: bool) -> str:
+def _html(cfg: Config, video_id: int, title: str, subject_uri: str, is_card: bool,
+          theme: str = "") -> str:
     """Maquette v5 — reproduction des 7 références de Michel :
     fond photo dramatique + voile coloré, PASTEUR PLEINE HAUTEUR,
     texte COURT géant (blanc/or, mot d'impact rouge), trait doré,
     nom du pasteur, logo de la chaîne, badge."""
     tint = TINTS[video_id % len(TINTS)]
     acc, rgb = COVER_ACCENTS[video_id % len(COVER_ACCENTS)]
-    fond = _fond_uri(video_id)
+    fond = _fond_uri(video_id, theme)
     left_side = video_id % 2 == 1  # pasteur à gauche ou à droite
     logo_uri = ""
     logo_file = ASSETS_DIR / "logo-chaine.png"
@@ -531,15 +562,30 @@ def generate_thumb(cfg: Config, db: Database, video_id: int) -> bool:
     thumbs_dir.mkdir(parents=True, exist_ok=True)
     out = thumbs_dir / f"{row['name']}.jpg"
 
-    thumb_title = (row["thumb_title"] if "thumb_title" in row.keys() and row["thumb_title"]
-                   else row["title"])
+    # Le titre SEO fait 60-90 caractères : affiché tel quel sur la miniature, il
+    # était tronqué et devenait illisible (« texte incompréhensible », Michel
+    # 24/07). On redérive donc une accroche courte au lieu de le recopier.
+    thumb_title = (row["thumb_title"] or "").strip() if "thumb_title" in row.keys() else ""
+    if not thumb_title:
+        from .metadata import derive_thumb_title
+        thumb_title = derive_thumb_title(row["title"] or "")
+    if not thumb_title:
+        # Dernier recours : sans miniature la vidéo ne serait jamais publiée
+        # (garde-fou du pipeline). Mieux vaut un titre raccourci proprement.
+        mots = [m for m in (row["title"] or "").split() if any(c.isalnum() for c in m)]
+        thumb_title = " ".join(mots[:5]).upper()
+    if not thumb_title:
+        log.warning("Aucun texte exploitable pour %s — miniature reportée", row["name"])
+        return False
+
+    theme = (row["thumb_theme"] or "") if "thumb_theme" in row.keys() else ""
     # Cover PRO sans détourage : photo BRUTE du pasteur en poster (retour Michel
     # 15/07 : « plus de détouré, pas pro »). Repli carte texte si orateur inconnu.
     photo = _portrait_raw(row, video_id)
     if photo:
         html = _html_photo(cfg, video_id, thumb_title, _b64(photo))
     else:
-        html = _html(cfg, video_id, thumb_title, "", is_card=False)
+        html = _html(cfg, video_id, thumb_title, "", is_card=False, theme=theme)
 
     # Shorts : occasionnellement une miniature VERTICALE (9:16) pour le flux Shorts.
     # Environ 1/4 des Shorts, varié par video_id. Les vidéos longues restent en 16:9.
