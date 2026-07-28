@@ -1,12 +1,16 @@
 # ============================= VORTEX AUTOMATOR =============================
 # Heures UTC (Cotonou = UTC+1)
 
-# Pipeline principal — toutes les 4 heures (6x/jour au lieu de 1x)
-# flock -n évite le chevauchement si un run dépasse 4h (improbable avec -n 8)
-15 */4 * * * flock -n /tmp/vortex-pipeline.lock -c "cd /opt/vortex/repo && docker compose -f docker-compose.vps.yml run --rm vortex sh vps/daily.sh" >> /opt/vortex/daily.log 2>&1
+# Pipeline principal — toutes les 6 heures.
+# Mesuré le 28/07 : un passage complet dure plus de 6 h sur ce serveur à
+# 2 cœurs partagé (rendu vidéo). `flock -n` fait sauter le déclenchement
+# suivant tant que le précédent tourne : le pipeline enchaîne donc en continu
+# sans jamais empiler deux encodages, ce qui saturait la machine.
+15 */6 * * * flock -n /tmp/vortex-pipeline.lock -c "cd /opt/vortex/repo && docker compose -f docker-compose.vps.yml run --rm vortex sh vps/daily.sh" >> /opt/vortex/daily.log 2>&1
 
-# Scan rapide — toutes les 2 heures (découvre vite les nouveaux TikTok)
-30 */2 * * * flock -n /tmp/vortex-scan.lock -c "cd /opt/vortex/repo && docker compose -f docker-compose.vps.yml run --rm vortex sh vps/fetch_tiktok.sh /app/videos/hedjav && docker compose -f docker-compose.vps.yml run --rm vortex python -m vortex scan && docker compose -f docker-compose.vps.yml run --rm vortex python -m vortex retry" >> /opt/vortex/repo/data/logs/vortex.log 2>&1
+# Scan rapide — toutes les 4 heures (découverte des nouveaux TikTok).
+# Léger : téléchargement + inventaire, aucun encodage.
+30 */4 * * * flock -n /tmp/vortex-scan.lock -c "cd /opt/vortex/repo && docker compose -f docker-compose.vps.yml run --rm vortex sh vps/fetch_tiktok.sh /app/videos/hedjav && docker compose -f docker-compose.vps.yml run --rm vortex python -m vortex scan && docker compose -f docker-compose.vps.yml run --rm vortex python -m vortex retry" >> /opt/vortex/repo/data/logs/vortex.log 2>&1
 
 # Stories — 5x/jour (8h, 11h, 14h, 17h, 20h UTC)
 0 8 * * * cd /opt/vortex/repo && docker compose -f docker-compose.vps.yml run --rm vortex python -m vortex story >> /opt/vortex/repo/data/logs/story.log 2>&1

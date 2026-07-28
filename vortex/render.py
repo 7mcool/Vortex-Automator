@@ -491,15 +491,19 @@ def render_video(cfg: Config, db: Database, video_id: int) -> bool:
     # l'étalonnage cinéma complet + la sortie 2K ci-dessous.
     light = (row["name"] or "").startswith("hedjav")
 
-    # Qualité maximale raisonnable : sortie 2K (verticale 1440x2560, horizontale
-    # 2560x1440). Dès 1440p, YouTube sert un codec bien meilleur (VP9/AV1) qu'en
-    # 1080p — c'est le principal levier de netteté perçue. La vraie 4K coûterait
-    # des heures d'encodage par vidéo sur un serveur 2 cœurs pour un gain marginal
-    # (surchargeable via cfg.render_width). Jamais de downscale.
-    # En mode léger : 1080p (pas d'upscale coûteux d'une source déjà propre).
+    # Résolution de sortie. Les sources basse définition (TikTok en 576 px de
+    # large) gagnent à être portées en 1080p : YouTube sert alors de meilleurs
+    # codecs. Au-delà, agrandir n'invente aucun détail.
+    #
+    # Les extraits de sermon sortent déjà en 1080p du découpeur. Les pousser en
+    # QHD doublait la mémoire d'FFmpeg : sur ce serveur à 2 cœurs, TOUS les
+    # rendus d'extraits mouraient en SIGKILL (28/07, journal daily.log). On ne
+    # dépasse donc jamais la définition de la source quand elle atteint déjà
+    # 1080p — surchargeable par cfg.render_width pour un serveur plus musclé.
     default_w = (1080 if src_h > src_w else 1920) if light else (1440 if src_h > src_w else 2560)
     target_w = int(getattr(cfg, "render_width", 0)) or default_w
-    out_w = max(src_w, target_w) // 2 * 2
+    deja_hd = min(src_w, src_h) >= 1080
+    out_w = (src_w if deja_hd else max(src_w, target_w)) // 2 * 2
     out_h = int(src_h * out_w / src_w) // 2 * 2
 
     # Accroche à l'écran = phrase CHOC courte (thumb_title, 4-6 mots) façon OpusClip,
@@ -550,7 +554,10 @@ def render_video(cfg: Config, db: Database, video_id: int) -> bool:
     # conservait des niveaux allant d'environ -33 LUFS à l'écrêtage. Une passe
     # loudnorm + AAC 192 kbit/s donne un niveau social propre et reproductible.
     af = "loudnorm=I=-14:LRA=11:TP=-1.5"
-    cmd = [find_ffmpeg(), "-v", "error", "-i", str(src), "-vf", vf, "-af", af,
+    # Deux fils d'encodage : au-delà, x264 alloue un jeu de tampons par fil et
+    # dépasse la mémoire du conteneur sur ce serveur à 2 cœurs.
+    cmd = [find_ffmpeg(), "-v", "error", "-threads", "2", "-i", str(src),
+           "-vf", vf, "-af", af,
            "-c:v", "libx264", "-preset", preset, "-crf", crf,
            "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
            "-movflags", "+faststart", "-y", str(out)]
