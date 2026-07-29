@@ -144,6 +144,22 @@ def _transcribe_timed(cfg: Config, path: str) -> tuple[list, float]:
     model_name = getattr(cfg, "clip_whisper_model", None) or "base"
     chunk_s = int(getattr(cfg, "clip_chunk_seconds", 0) or 600)
     duration = _audio_duration(path)
+
+    # Transcrire 3 h 25 prend trois quarts d'heure. Sans cache, la moindre
+    # reprise (réponse de l'IA inexploitable, coupure réseau) recommencerait
+    # tout depuis le début. Le cache vit à côté de la source et disparaît
+    # avec elle.
+    cache = Path(path).with_suffix(".segments.json")
+    if cache.exists():
+        try:
+            enregistre = json.loads(cache.read_text(encoding="utf-8"))
+            segs_caches = [tuple(s) for s in enregistre["segments"]]
+            if segs_caches:
+                log.info("Transcription reprise du cache (%d segments)", len(segs_caches))
+                return segs_caches, float(enregistre.get("duration") or duration)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            log.warning("Cache de transcription illisible (%s) — on recommence", exc)
+
     log.info("Transcription de repérage (modèle '%s', source %.0f min, tranches de %d min)…",
              model_name, duration / 60, chunk_s // 60)
     model = WhisperModel(model_name, device=cfg.whisper_device,
@@ -185,6 +201,14 @@ def _transcribe_timed(cfg: Config, path: str) -> tuple[list, float]:
     finally:
         del model
         gc.collect()
+
+    if segs:
+        try:
+            cache.write_text(
+                json.dumps({"duration": duration, "segments": segs}, ensure_ascii=False),
+                encoding="utf-8")
+        except OSError as exc:
+            log.warning("Cache de transcription non écrit : %s", exc)
     return segs, duration
 
 
@@ -215,11 +239,19 @@ def _ask_clips(cfg: Config, segs: list, duration: float,
     key = os.environ.get("DEEPSEEK_API_KEY")
     if not key:
         log.error("DEEPSEEK_API_KEY absent — clipper indisponible")
-        return []
+        return [], ""
     lines = [f"[{s:.0f}-{e:.0f}] {t}" for s, e, t in segs]
     transcript = "\n".join(lines)
     if len(transcript) > 90000:  # ~2 h de sermon max par appel
-        transcript = transcript[:90000]
+        # Tronquer sans le dire laissait croire que l'IA avait vu tout le
+        # sermon : sur un direct de 3 h 25, plus de la moitié lui échappait.
+        garde = transcript[:90000].rsplit("\n", 1)[0]
+        couvert = float(garde.rsplit("[", 1)[-1].split("-", 1)[0] or 0)
+        log.warning(
+            "Transcription tronquée : %d caractères sur %d — l'IA ne voit que "
+            "les %.0f premières minutes sur %.0f",
+            len(garde), len(transcript), couvert / 60, duration / 60)
+        transcript = garde
     # Décision de Michel (29/07) : pas de plafond arbitraire, on garde tout ce qui
     # le mérite. Le nombre suit donc la durée — environ un extrait par sept minutes
     # de sermon. Le maximum reste borné parce que la réponse doit tenir dans
@@ -252,9 +284,23 @@ def _ask_clips(cfg: Config, segs: list, duration: float,
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=300) as r:
             resp = json.load(r)
-        reponse = _parse_json_obj(resp["choices"][0]["message"]["content"])
+        brut = resp["choices"][0]["message"]["content"] or ""
+        fin = (resp.get("choices") or [{}])[0].get("finish_reason", "")
+        reponse = _parse_json_obj(brut)
         clips = reponse.get("clips", [])
         evenement = str(reponse.get("evenement", "")).strip()[:80]
+        # Sans ces traces, une réponse tronquée ou vide donnait « 0 extrait »
+        # sans le moindre indice sur la cause.
+        if not clips:
+            log.error(
+                "DeepSeek n'a propose aucun extrait (finish_reason=%s, "
+                "reponse de %d caracteres, JSON %s). Debut : %s",
+                fin, len(brut),
+                "illisible" if not reponse else f"sans cle 'clips' ({list(reponse)[:5]})",
+                brut[:400].replace("\n", " "))
+            if fin == "length":
+                log.error("Reponse coupee par max_tokens — augmenter le budget "
+                          "ou reduire max_clips")
     except Exception as exc:
         log.error("DeepSeek clipper échoué : %s", exc)
         return [], ""
@@ -262,6 +308,7 @@ def _ask_clips(cfg: Config, segs: list, duration: float,
     starts = [s for s, _, _ in segs]
     ends = [e for _, e, _ in segs]
     valid = []
+    rejetes: list[str] = []
     for c in clips:
         try:
             start = min(starts, key=lambda x: abs(x - float(c["start"])))
@@ -274,6 +321,7 @@ def _ask_clips(cfg: Config, segs: list, duration: float,
         # « sequence ». Une marge de 5 s absorbe le calage sur les segments.
         longueur = end - start
         if longueur < 85 or longueur > 900 or start >= end:
+            rejetes.append(f"{start:.0f}-{end:.0f}s ({longueur:.0f}s)")
             continue
         valid.append({"start": start, "end": end,
                       "type": str(c.get("type", "moyen"))[:20],
@@ -286,6 +334,11 @@ def _ask_clips(cfg: Config, segs: list, duration: float,
                       "title": str(c.get("title", "")).strip()[:95],
                       "hook": str(c.get("hook", "")).strip()[:90],
                       "description": str(c.get("description", "")).strip()[:500]})
+    if rejetes:
+        # Une duree hors bornes est la cause la plus frequente d'un
+        # decoupage vide : la nommer evite de chercher ailleurs.
+        log.warning("%d extrait(s) ecarte(s) pour duree hors bornes (85-900 s) : %s",
+                    len(rejetes), ", ".join(rejetes[:8]))
     return valid, evenement
 
 
