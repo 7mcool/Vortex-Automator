@@ -10,8 +10,8 @@ token_file = '/app/secrets/youtube_token.json'
 [publish]
 facebook_publish = true
 instagram_publish = true
-hours = [0, 3, 6, 9, 12, 15, 18, 21]
-daily_limit = 8
+hours = [3, 7, 11, 14, 17, 20]      # 6 créneaux par jour
+daily_limit = 6
 timezone = "Africa/Porto-Novo"
 category_id = "27"
 language = "fr"
