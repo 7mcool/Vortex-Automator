@@ -34,6 +34,10 @@ KNOWN_PASTORS = [
     (re.compile(r"amess?an", re.I), "Jacques Amessan"),
     (re.compile(r"bodjiy|bodjy|generation daniel|génération daniel", re.I), "Aimé Bodjiyé"),
     (re.compile(r"sanogo|vases? d.?honneur", re.I), "Mohammed Sanogo"),
+    # Orthographe exacte verifiee sur ses comptes officiels (YouTube
+    # @Pasteurydjatti) : Djatti prend deux T. La transcription automatique
+    # rendait « Unique Jati » — d ou ce motif tolerant.
+    (re.compile(r"dja?ti|djatti|centre chr.?tien de r.?veil|ccr", re.I), "Yannick Djatti"),
 ]
 
 

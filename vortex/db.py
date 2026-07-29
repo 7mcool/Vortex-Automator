@@ -170,10 +170,15 @@ class Database:
         return self.conn.execute("SELECT * FROM videos WHERE id = ?", (video_id,)).fetchone()
 
     def by_state(self, state: str, limit: int = 0) -> list[sqlite3.Row]:
-        # Priorité aux vidéos substantielles (30 s à 3 min : vraies prédications),
-        # puis les plus longues d'abord ; les mini-clips passent en dernier.
+        # LE RÉCENT D'ABORD (règle de Michel, 29/07) : un sermon prêché hier
+        # intéresse davantage que le fonds de catalogue, et une conférence en
+        # cours doit sortir pendant qu'elle a lieu. `rowid` décroissant suffit :
+        # une vidéo entre en base au moment où elle est découverte.
+        # À fraîcheur égale, on garde les vidéos substantielles (30 s à 3 min)
+        # avant les mini-clips.
         sql = ("SELECT * FROM videos WHERE state = ? "
-               "ORDER BY CASE WHEN duration_s BETWEEN 30 AND 180 THEN 0 ELSE 1 END, "
+               "ORDER BY rowid DESC, "
+               "CASE WHEN duration_s BETWEEN 30 AND 180 THEN 0 ELSE 1 END, "
                "duration_s DESC")
         if limit:
             sql += f" LIMIT {int(limit)}"

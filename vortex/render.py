@@ -609,7 +609,9 @@ def render_pending(cfg: Config, db: Database, limit: int = 0) -> int:
 
     rows = db.conn.execute(
         "SELECT id, render_path FROM videos WHERE state = 'READY' "
-        "ORDER BY CASE WHEN duration_s BETWEEN 30 AND 180 THEN 0 ELSE 1 END, "
+        # Même ordre que la publication : le récent d'abord.
+        "ORDER BY rowid DESC, "
+        "CASE WHEN duration_s BETWEEN 30 AND 180 THEN 0 ELSE 1 END, "
         "duration_s DESC").fetchall()
     done = 0
     for r in rows:

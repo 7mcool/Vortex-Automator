@@ -35,7 +35,7 @@ compute_type = "int8"
 channel_name = "Sophos PropheTikos"
 # Orateurs possibles — le système n'attribue un nom QUE s'il est clairement
 # identifiable dans la légende ou la transcription de la vidéo.
-known_speakers = ["Jacques Amessan", "Mohammed Sanogo"]
+known_speakers = ["Jacques Amessan", "Mohammed Sanogo", "Yannick Djatti", "Aimé Bodjiyé"]
 hashtags = ["#foi", "#motivation", "#predication"]
 max_title_len = 95
 tags_count = 15

@@ -290,6 +290,7 @@ PASTOR_CHURCH = {
     "Jacques Amessan": "La Maison de la Sagesse",
     "Aimé Bodjiyé": "Église Génération Daniel",
     "Mohammed Sanogo": "Église Vases d'Honneur",
+    "Yannick Djatti": "Églises Centre Chrétien de Réveil",
 }
 
 

@@ -23,6 +23,7 @@ SPEAKER_MARKERS = {
     "jacques amessan": "Jacques Amessan",
     "mohammed sanogo": "Mohammed Sanogo",
     "aime bodjiye": "Aimé Bodjiyé",
+    "yannick djatti": "Yannick Djatti",
 }
 
 
