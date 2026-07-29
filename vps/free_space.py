@@ -137,6 +137,43 @@ def clean_originals(db: sqlite3.Connection) -> tuple[int, int]:
     return freed, count
 
 
+def clean_renders_excedentaires(db: sqlite3.Connection,
+                                avance: int = 12) -> tuple[int, int]:
+    """Rendus des vidéos ENCORE EN ATTENTE, au-delà de la réserve utile.
+
+    Un rendu est entièrement reproductible : il se refait depuis l'extrait en
+    quelques minutes. En garder cent quarante-cinq d'avance quand on publie six
+    fois par jour immobilise plusieurs gigaoctets pour rien — c'est ce qui a
+    rempli le disque à 100 % le 29/07. On conserve donc les plus récents, qui
+    sortiront les premiers, et on efface le reste.
+    """
+    lignes = db.execute(
+        "SELECT id, render_path FROM videos WHERE state = 'READY' "
+        "AND render_path IS NOT NULL AND render_path != '' "
+        "ORDER BY rowid DESC"
+    ).fetchall()
+
+    freed = count = 0
+    for rang, ligne in enumerate(lignes):
+        if rang < avance:
+            continue                       # réserve : on n'y touche pas
+        rendu = Path(ligne["render_path"])
+        if not rendu.is_file():
+            continue
+        size = _drop(rendu)
+        if not rendu.exists():
+            freed += size
+            count += 1
+            # Sans cet oubli en base, le pipeline croirait le rendu présent et
+            # refuserait de le refaire.
+            db.execute("UPDATE videos SET render_path = NULL WHERE id = ?",
+                       (ligne["id"],))
+    if count:
+        db.commit()
+        print(f"  {count} rendu(s) d'avance effacé(s), refaits au besoin")
+    return freed, count
+
+
 def clean_avortes() -> tuple[int, int]:
     """Restes de telechargements ABANDONNES : .part et .ytdl.
 
@@ -221,17 +258,18 @@ def main() -> None:
         sources_freed, sources_n = clean_sources(db)
         originals_freed, originals_n = clean_originals(db)
         tiktok_freed, tiktok_n = clean_tiktok(db)
+        avance_freed, avance_n = clean_renders_excedentaires(db)
     finally:
         db.close()
     avortes_freed, avortes_n = clean_avortes()
 
     total = (exports_freed + sources_freed + originals_freed
-             + avortes_freed + tiktok_freed)
+             + avortes_freed + tiktok_freed + avance_freed)
     print(
         f"Libere : {_mib(total)} Mio "
         f"({exports_n} rendu(s), {sources_n} source(s), "
         f"{originals_n} original(aux), {avortes_n} avorte(s), "
-        f"{tiktok_n} de la file TikTok)"
+        f"{tiktok_n} de la file TikTok, {avance_n} rendu(s) d'avance)"
     )
 
 

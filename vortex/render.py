@@ -556,9 +556,16 @@ def render_video(cfg: Config, db: Database, video_id: int) -> bool:
     af = "loudnorm=I=-14:LRA=11:TP=-1.5"
     # Deux fils d'encodage : au-delà, x264 alloue un jeu de tampons par fil et
     # dépasse la mémoire du conteneur sur ce serveur à 2 cœurs.
+    # Plafond de débit aligné sur ce que YouTube INGÈRE réellement : 12 Mbit/s
+    # en 1080p. Mesuré le 29/07, les rendus sortaient à 16-21 Mbit/s — près du
+    # double, pour rien : YouTube ré-encode tout, et le surplus ne survit pas à
+    # son passage. Il coûtait en revanche 350 à 450 Mo par extrait, sur un
+    # serveur qui n'a que quelques gigaoctets de libre. Le CRF reste le pilote
+    # de la qualité ; le plafond ne mord que sur les pics.
     cmd = [find_ffmpeg(), "-v", "error", "-threads", "2", "-i", str(src),
            "-vf", vf, "-af", af,
            "-c:v", "libx264", "-preset", preset, "-crf", crf,
+           "-maxrate", "12M", "-bufsize", "24M",
            "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
            "-movflags", "+faststart", "-y", str(out)]
     try:
