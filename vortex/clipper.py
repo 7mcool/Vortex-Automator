@@ -21,6 +21,7 @@ import logging
 import os
 import shutil
 import subprocess
+import tempfile
 import urllib.request
 from pathlib import Path
 
@@ -485,12 +486,15 @@ def _cut_montage(src: str, intervals: list[tuple], out: Path,
     for i, (a, b) in enumerate(intervals):
         a_rel, b_rel = max(0.0, a - seek), max(0.0, b - seek)
         vf = vf_per[i] if isinstance(vf_per, list) else vf_per
-        # Normaliser SAR/pixel format : des crops/zooms différents ne peuvent
+        # Le filtre d'un plan peut être un simple enchaînement OU un sous-graphe
+        # à plusieurs branches (fond flouté + image entière par-dessus, quand un
+        # verset s'affiche). Les deux se présentent sous la même forme : de
+        # `[in]` vers `[vout]`.
+        fc.append(f"[0:v]trim={a_rel:.3f}:{b_rel:.3f},setpts=PTS-STARTPTS[pre{i}]")
+        fc.append(vf.replace("[in]", f"[pre{i}]").replace("[vout]", f"[brut{i}]"))
+        # Normaliser SAR/pixel format : des cadrages différents ne peuvent
         # sinon pas être concaténés proprement par FFmpeg.
-        fc.append(
-            f"[0:v]trim={a_rel:.3f}:{b_rel:.3f},setpts=PTS-STARTPTS,{vf},"
-            f"setsar=1,format=yuv420p[v{i}]"
-        )
+        fc.append(f"[brut{i}]setsar=1,format=yuv420p[v{i}]")
         fc.append(
             f"[0:a]atrim={a_rel:.3f}:{b_rel:.3f},"
             f"asetpts=PTS-STARTPTS[a{i}]"
@@ -520,12 +524,50 @@ def _cut_horizontal(src: str, start: float, end: float, out: Path,
     return _cut(src, start, end, out, vf)
 
 
-def _montage_filters(src: str, intervals: list[tuple],
-                     src_w: int, src_h: int) -> tuple[list[str], list[str]]:
+def _texte_a_l_ecran(src: str, at: float, minimum_mots: int = 9) -> bool:
+    """Vrai si l'image porte un vrai bloc de texte (verset projeté, citation).
+
+    Le recadrage vertical ampute forcément les côtés : un verset affiché en
+    pleine largeur devient illisible. On le détecte pour garder l'image
+    entière à cet instant. Le seuil est haut exprès — un simple bandeau avec
+    le nom du prédicateur ne doit pas déclencher le changement de cadrage.
+    """
+    try:
+        from .textdetect import find_tesseract, ocr_image
+    except ImportError:
+        return False
+    tesseract = find_tesseract()
+    if not tesseract:
+        return False
+    with tempfile.TemporaryDirectory() as tmp:
+        image = Path(tmp) / "f.png"
+        proc = subprocess.run(
+            [find_ffmpeg(), "-v", "error", "-ss", f"{at:.2f}", "-i", src,
+             "-frames:v", "1", "-vf", "scale=960:-2", "-y", str(image)],
+            capture_output=True, timeout=60)
+        if proc.returncode or not image.exists():
+            return False
+        try:
+            texte = ocr_image(tesseract, image)
+        except Exception:
+            return False
+    mots = [m for m in texte.split() if len(m) >= 3 and any(c.isalpha() for c in m)]
+    return len(mots) >= minimum_mots
+
+
+def _montage_filters(src: str, intervals: list[tuple], src_w: int, src_h: int,
+                     detecter_texte: bool = True) -> tuple[list[str], list[str]]:
     """Plans horizontaux + verticaux par intervalle de parole.
 
     Chaque vraie pause devient une coupe. De légers punch-ins alternés donnent
     du rythme ; le vertical se recadre sur le visage à chaque nouveau plan.
+
+    CADRAGE ADAPTATIF (retour de Michel, 29/07) : quand un verset s'affiche à
+    l'écran, le recadrage 9:16 en coupe la moitié et le rend illisible. Sur ces
+    plans-là on garde donc l'image 16:9 ENTIÈRE, centrée dans le format
+    vertical, sur un fond flouté tiré de l'image elle-même — c'est ce que fait
+    OpusClip. Les filtres renvoyés sont des sous-graphes complets, de `[in]`
+    vers `[vout]`, car cet effet demande une copie de l'image.
     """
     horizontal, vertical = [], []
     for index, (start, end) in enumerate(intervals):
@@ -534,24 +576,40 @@ def _montage_filters(src: str, intervals: list[tuple],
             crop_w = max(2, int(src_w / zoom) // 2 * 2)
             crop_h = max(2, int(src_h / zoom) // 2 * 2)
             horizontal.append(
-                f"crop={crop_w}:{crop_h}:(iw-{crop_w})/2:(ih-{crop_h})/2,"
-                f"scale={src_w}:{src_h}:flags=lanczos"
+                f"[in]crop={crop_w}:{crop_h}:(iw-{crop_w})/2:(ih-{crop_h})/2,"
+                f"scale={src_w}:{src_h}:flags=lanczos[vout]"
             )
         else:
-            horizontal.append(f"scale={src_w}:{src_h}:flags=lanczos")
+            horizontal.append(f"[in]scale={src_w}:{src_h}:flags=lanczos[vout]")
 
         if src_h > src_w:
-            vertical.append("scale=1080:1920:force_original_aspect_ratio=increase,"
-                            "crop=1080:1920")
+            vertical.append("[in]scale=1080:1920:force_original_aspect_ratio=increase,"
+                            "crop=1080:1920[vout]")
             continue
+
+        milieu = (start + end) / 2
+        if detecter_texte and _texte_a_l_ecran(src, milieu):
+            # Image entière, centrée, sur un fond flouté : tout le verset reste
+            # lisible et le cadre ne paraît pas vide.
+            vertical.append(
+                f"[in]split=2[bg{index}][fg{index}];"
+                f"[bg{index}]scale=1080:1920:force_original_aspect_ratio=increase,"
+                f"crop=1080:1920,boxblur=28:2,eq=brightness=-0.12[bgb{index}];"
+                f"[fg{index}]scale=1080:-2:flags=lanczos[fgs{index}];"
+                f"[bgb{index}][fgs{index}]overlay=(W-w)/2:(H-h)/2[vout]"
+            )
+            log.info("Plan %d (%.0fs) : texte à l'écran → image entière conservée",
+                     index + 1, milieu)
+            continue
+
         crop_h = max(2, int(src_h / zoom) // 2 * 2)
         crop_w = max(2, int(crop_h * 9 / 16) // 2 * 2)
-        center = _face_center_x(src, (start + end) / 2, src_w, src_h)
+        center = _face_center_x(src, milieu, src_w, src_h)
         left = max(0, min(src_w - crop_w, int(center * src_w - crop_w / 2)))
         top = max(0, (src_h - crop_h) // 2)
         vertical.append(
-            f"crop={crop_w}:{crop_h}:{left}:{top},"
-            "scale=1080:1920:flags=lanczos"
+            f"[in]crop={crop_w}:{crop_h}:{left}:{top},"
+            "scale=1080:1920:flags=lanczos[vout]"
         )
     return horizontal, vertical
 
