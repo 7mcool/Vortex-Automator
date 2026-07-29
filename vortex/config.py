@@ -37,6 +37,12 @@ class Config:
     data_dir: Path
     client_secret_file: Path
     token_file: Path
+    # Dossiers du découpeur. Ils étaient écrits en dur dans clipper.py sous la
+    # forme « /app/... » : sous Windows ce n'est PAS un chemin absolu, il se
+    # résout sur le lecteur courant (C:\app\...). Le découpage ne trouvait donc
+    # aucune source et écrivait les verticaux hors du dépôt, sans erreur.
+    sources_dir: Path
+    tiktok_queue_dir: Path
 
     # Publication
     publish_hours: list[int] = field(default_factory=lambda: [9, 12, 15, 18, 21])
@@ -125,6 +131,10 @@ def load_config(config_file: Path | None = None) -> Config:
         token_file=_path(
             os.environ.get("VORTEX_TOKEN_FILE", paths.get("token_file", r"secrets\youtube_token.json"))
         ),
+        # Valeurs par défaut identiques à l'ancien code en dur : le VPS ne bouge
+        # pas. Le PC les redéfinit en relatif dans son propre config.toml.
+        sources_dir=_path(paths.get("sources_dir", "/app/videos/sources")),
+        tiktok_queue_dir=_path(paths.get("tiktok_queue_dir", "/app/videos/tiktok_queue")),
         publish_hours=list(publish.get("hours", [9, 12, 15, 18, 21])),
         daily_limit=int(publish.get("daily_limit", 5)),
         timezone=publish.get("timezone", "Africa/Porto-Novo"),

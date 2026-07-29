@@ -26,10 +26,10 @@ from pathlib import Path
 from .config import Config
 from .db import Database
 from .textdetect import find_ffmpeg
+from .scanner import find_ffprobe
 
 log = logging.getLogger("vortex.clipper")
 
-SOURCES_DIR = Path("/app/videos/sources")
 
 # Chaîne source → pasteur habituel (ministères d'UN SEUL pasteur, confirmés par
 # Michel). Utilisé comme indice pour la cover (photo HD) ET vérifié par l'IA :
@@ -118,7 +118,7 @@ Réponds UNIQUEMENT avec le JSON."""
 
 def _audio_duration(path: str) -> float:
     out = subprocess.run(
-        [find_ffmpeg().replace("ffmpeg", "ffprobe"), "-v", "quiet",
+        [find_ffprobe(), "-v", "quiet",
          "-show_entries", "format=duration", "-of", "csv=p=0", path],
         capture_output=True, text=True, timeout=120)
     try:
@@ -534,7 +534,7 @@ def _cut_vertical(src: str, start: float, end: float, out: Path,
 
 def _probe_dims(path: str) -> tuple[int, int]:
     out = subprocess.run(
-        [find_ffmpeg().replace("ffmpeg", "ffprobe"), "-v", "quiet", "-print_format",
+        [find_ffprobe(), "-v", "quiet", "-print_format",
          "json", "-show_streams", path], capture_output=True, text=True, timeout=60)
     data = json.loads(out.stdout)
     v = next(s for s in data["streams"] if s["codec_type"] == "video")
@@ -545,7 +545,7 @@ def _probe_duration(path: str | Path) -> float | None:
     """Durée réellement encodée, utilisée notamment pour la limite Shorts."""
     try:
         out = subprocess.run(
-            [find_ffmpeg().replace("ffmpeg", "ffprobe"), "-v", "error",
+            [find_ffprobe(), "-v", "error",
              "-show_entries", "format=duration", "-of", "default=nw=1:nk=1",
              str(path)],
             capture_output=True, text=True, timeout=60, check=True,
@@ -590,10 +590,10 @@ def _ensure_table(db: Database) -> None:
 def process_one_source(cfg: Config, db: Database) -> int:
     """Traite UNE vidéo source non encore découpée. Retourne le nb d'extraits créés."""
     _ensure_table(db)
-    if not SOURCES_DIR.is_dir():
-        log.info("Aucun dossier sources (%s)", SOURCES_DIR)
+    if not cfg.sources_dir.is_dir():
+        log.info("Aucun dossier sources (%s)", cfg.sources_dir)
         return 0
-    candidates = sorted(SOURCES_DIR.glob("*/*.mp4"), key=lambda p: p.name, reverse=True)
+    candidates = sorted(cfg.sources_dir.glob("*/*.mp4"), key=lambda p: p.name, reverse=True)
     src = None
     for c in candidates:
         done = db.conn.execute("SELECT 1 FROM clip_sources WHERE path = ?", (str(c),)).fetchone()
@@ -631,7 +631,7 @@ def process_one_source(cfg: Config, db: Database) -> int:
 
     src_w, src_h = _probe_dims(str(src))
     chan = src.parent.name
-    tiktok_dir = Path("/app/videos/tiktok_queue")
+    tiktok_dir = cfg.tiktok_queue_dir
     tiktok_dir.mkdir(parents=True, exist_ok=True)
     # Le flux /streams contient aussi des invités. Ne jamais déduire « Jacques
     # Amessan » du seul nom de la chaîne : le nom doit être présent dans le titre.

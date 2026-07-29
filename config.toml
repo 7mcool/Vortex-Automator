@@ -1,11 +1,16 @@
 # Configuration Vortex Automator — AUCUN SECRET ICI (les secrets vont dans .env / secrets/)
 
 [paths]
-source_dir = 'E:\hedjav\4K Tokkit\hedjav'
+source_dir = 'videos\clips_horizontaux'             # sortie 16:9 du découpeur
 tokkit_db = 'E:\hedjav\4K Tokkit\data.sqlite'
 data_dir = 'data'                                   # relatif à la racine du dépôt
 client_secret_file = 'secrets\client_secret.json'
 token_file = 'secrets\youtube_token.json'
+# Dossiers du découpeur. Sur le VPS ils valent /app/videos/... ; ici ils sont
+# relatifs au dépôt, sinon Python les résoudrait en C:\app\videos\... — un
+# chemin avec racine mais sans lettre de lecteur n'est pas absolu sous Windows.
+sources_dir = 'videos\sources'
+tiktok_queue_dir = 'videos\tiktok_queue'
 
 [publish]
 hours = [9, 12, 15, 18, 21]      # 5 créneaux par jour
