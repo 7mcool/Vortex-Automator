@@ -20,13 +20,23 @@ assets et la base.
 from __future__ import annotations
 
 import sqlite3
+import time
 from pathlib import Path
 
 DB = Path("/app/data/vortex.db")
 EXPORTS = Path("/app/data/exports")
 SOURCES = Path("/app/videos/sources")
 HEDJAV = Path("/app/videos/hedjav")
+TIKTOK = Path("/app/videos/tiktok_queue")
 DONE_STATES = ("PUBLISHED", "SCHEDULED")
+# La file TikTok n'a aucune sortie tant que l'API n'est pas approuvee : elle
+# grossit d'un vertical par extrait, indefiniment. On la borne en gardant les
+# plus recents, qui sont ceux qu'on publierait en premier.
+TIKTOK_BUDGET = 2 * 1024 ** 3   # 2 Gio
+# Un .part inactif depuis six heures n'appartient plus a aucun telechargement :
+# yt-dlp ecrit en continu, et le pipeline lui-meme ne dure jamais aussi longtemps
+# sans toucher a son fichier.
+AGE_ABANDON = 6 * 3600
 
 
 def _mib(size: int) -> int:
@@ -34,11 +44,17 @@ def _mib(size: int) -> int:
 
 
 def _drop(path: Path) -> int:
-    """Supprime un fichier et renvoie l'espace libere (0 si echec)."""
+    """Supprime un fichier et renvoie l'espace REELLEMENT libere.
+
+    Un fichier partage par un lien dur ne libere rien tant que l'autre nom
+    existe : le compter fausserait le bilan et ferait croire le menage
+    efficace alors que le disque n'a pas bouge.
+    """
     try:
-        size = path.stat().st_size
+        infos = path.stat()
     except OSError:
         return 0
+    size = 0 if infos.st_nlink > 1 else infos.st_size
     try:
         path.unlink()
     except OSError as exc:
@@ -81,13 +97,16 @@ def clean_sources(db: sqlite3.Connection) -> tuple[int, int]:
     for mp4 in sorted(SOURCES.glob("*/*.mp4")):
         if str(mp4) not in clipped:
             continue
+        if not mp4.exists():
+            continue
         size = _drop(mp4)
-        if size:
+        if not mp4.exists():
             freed += size
             count += 1
             print(f"  source {mp4.name} ({_mib(size)} Mio)")
-        # Le sidecar de metadonnees n'a plus d'utilite sans sa video.
-        mp4.with_suffix(".info.json").unlink(missing_ok=True)
+            # Le sidecar ne part qu'avec sa video : le garder seul empecherait
+            # de savoir quoi retelecharger si la suppression avait echoue.
+            mp4.with_suffix(".info.json").unlink(missing_ok=True)
     return freed, count
 
 
@@ -118,6 +137,82 @@ def clean_originals(db: sqlite3.Connection) -> tuple[int, int]:
     return freed, count
 
 
+def clean_avortes() -> tuple[int, int]:
+    """Restes de telechargements ABANDONNES : .part et .ytdl.
+
+    Un yt-dlp vivant reecrit son .part en permanence. Toucher un fichier
+    encore actif serait desastreux : sous Linux l'inode reste ouvert, donc
+    aucun octet n'est rendu, et le renommage final echoue — le sermon est
+    perdu et retelecharge au passage suivant. L'age depuis la derniere
+    ecriture distingue de facon fiable l'abandon du travail en cours.
+    """
+    freed = count = 0
+    maintenant = time.time()
+    for dossier in (SOURCES, HEDJAV):
+        if not dossier.is_dir():
+            continue
+        for motif in ("*/*.part", "*.part", "*/*.ytdl", "*.ytdl"):
+            for reste in dossier.glob(motif):
+                try:
+                    inactif = maintenant - reste.stat().st_mtime
+                except OSError:
+                    continue
+                if inactif < AGE_ABANDON:
+                    continue
+                size = _drop(reste)
+                if size:
+                    freed += size
+                    count += 1
+                    print(f"  avorte {reste.name} ({_mib(size)} Mio)")
+    return freed, count
+
+
+def clean_tiktok(db: sqlite3.Connection) -> tuple[int, int]:
+    """Borne la file TikTok, sans jamais detruire un exemplaire unique.
+
+    L'API TikTok n'est pas approuvee : rien ne vide ce dossier, qui grossit
+    d'un vertical par extrait. Mais le sermon d'origine est efface des qu'il
+    est decoupe : un vertical peut donc etre le SEUL exemplaire de ce
+    passage. On ne supprime donc que ce qui est deja en ligne sur YouTube,
+    et seulement au-dela du budget.
+    """
+    if not TIKTOK.is_dir():
+        return 0, 0
+
+    candidats = []
+    for clip in TIKTOK.glob("*.mp4"):
+        try:
+            infos = clip.stat()
+        except OSError:
+            continue
+        # Le nom de la video en base est le radical, sans le suffixe _tiktok.
+        nom = clip.stem[:-7] if clip.stem.endswith("_tiktok") else clip.stem
+        ligne = db.execute(
+            "SELECT state FROM videos WHERE name = ?", (nom,)
+        ).fetchone()
+        remplacable = ligne is not None and ligne["state"] in DONE_STATES
+        candidats.append((infos.st_mtime, infos.st_size, clip, remplacable))
+
+    candidats.sort(reverse=True)          # les plus recents sont gardes
+    cumul = freed = count = 0
+    for _, taille, clip, remplacable in candidats:
+        if cumul + taille <= TIKTOK_BUDGET:
+            cumul += taille
+            continue
+        if not remplacable:
+            # Aucune trace de ce passage ailleurs : on le garde, quitte a
+            # depasser le budget. Mieux vaut un disque plein qu'un extrait perdu.
+            cumul += taille
+            continue
+        size = _drop(clip)
+        if size:
+            freed += size
+            count += 1
+            print(f"  file TikTok {clip.name} ({_mib(size)} Mio)")
+            clip.with_suffix(".info.json").unlink(missing_ok=True)
+    return freed, count
+
+
 def main() -> None:
     db = sqlite3.connect(DB)
     db.row_factory = sqlite3.Row
@@ -125,14 +220,18 @@ def main() -> None:
         exports_freed, exports_n = clean_exports(db)
         sources_freed, sources_n = clean_sources(db)
         originals_freed, originals_n = clean_originals(db)
+        tiktok_freed, tiktok_n = clean_tiktok(db)
     finally:
         db.close()
+    avortes_freed, avortes_n = clean_avortes()
 
-    total = exports_freed + sources_freed + originals_freed
+    total = (exports_freed + sources_freed + originals_freed
+             + avortes_freed + tiktok_freed)
     print(
         f"Libere : {_mib(total)} Mio "
         f"({exports_n} rendu(s), {sources_n} source(s), "
-        f"{originals_n} original(aux))"
+        f"{originals_n} original(aux), {avortes_n} avorte(s), "
+        f"{tiktok_n} de la file TikTok)"
     )
 
 

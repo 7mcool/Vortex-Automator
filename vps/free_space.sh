@@ -25,6 +25,11 @@ if [ "$before" -lt "$THRESHOLD_PCT" ]; then
 fi
 
 log "Disque a ${before}% - nettoyage..."
-docker compose -f "$COMPOSE" run --rm --no-deps vortex python3 /app/vps/free_space.py
+# Meme verrou que le pipeline : nettoyer pendant qu'il telecharge ou encode
+# reviendrait a retirer des fichiers en cours d'ecriture. Si le pipeline
+# tourne, le menage saute simplement — il repassera dans trois heures.
+flock -n /tmp/vortex-pipeline.lock -c \
+  "docker compose -f '$COMPOSE' run --rm --no-deps vortex python3 /app/vps/free_space.py" \
+  || log "Pipeline en cours - nettoyage reporte"
 after=$(used_pct)
 log "Termine : disque ${before}% -> ${after}%"

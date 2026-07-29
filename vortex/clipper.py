@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import subprocess
 import urllib.request
 from pathlib import Path
@@ -691,7 +692,30 @@ def process_one_source(cfg: Config, db: Database) -> int:
                 short_stem = f"{stem}_short"
                 out_s = cfg.source_dir / f"{short_stem}.mp4"
                 try:
-                    out_s.write_bytes(out_v.read_bytes())
+                    # Lien dur plutôt que copie : le fichier n'existe qu'une
+                    # fois sur le disque et n'est jamais chargé en mémoire.
+                    # `write_bytes(read_bytes())` doublait chaque vertical et
+                    # faisait un pic de RAM égal à sa taille, sur une machine
+                    # où il reste moins d'un gigaoctet libre.
+                    #
+                    # On passe par un fichier temporaire puis on bascule d'un
+                    # coup : écrire directement sur out_s détruirait la version
+                    # précédente avant de savoir si la nouvelle aboutit, et
+                    # laisserait un fichier tronqué que le scanner ingérerait.
+                    tmp_s = out_s.with_name(short_stem + ".tmp.mp4")
+                    tmp_s.unlink(missing_ok=True)
+                    try:
+                        try:
+                            os.link(out_v, tmp_s)
+                        except OSError:
+                            # Volumes différents ou système de fichiers sans
+                            # liens durs : la copie reste correcte, seulement
+                            # plus coûteuse.
+                            shutil.copyfile(out_v, tmp_s)
+                        os.replace(tmp_s, out_s)
+                    except OSError:
+                        tmp_s.unlink(missing_ok=True)
+                        raise
                     out_s.with_name(short_stem + ".info.json").write_text(
                         json.dumps({"description": f"{prefix}{c['title']} — {c['hook']} "
                                     f"{c['description']}", "format": "short",

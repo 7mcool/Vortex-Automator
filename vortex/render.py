@@ -584,6 +584,29 @@ def render_pending(cfg: Config, db: Database, limit: int = 0) -> int:
     if "render_path" not in cols:
         db.conn.execute("ALTER TABLE videos ADD COLUMN render_path TEXT")
         db.conn.commit()
+    # Réserve d'avance : un rendu pèse 20 à 200 Mo et n'est effacé qu'une fois
+    # la vidéo en ligne. Le pipeline tournant plus souvent que la publication
+    # n'écoule (quatre passages par jour contre huit publications), les rendus
+    # excédentaires s'accumulaient de plusieurs gigaoctets par jour. On s'arrête
+    # donc dès qu'il y a de quoi tenir deux jours de publication.
+    avance_max = max(int(getattr(cfg, "daily_limit", 5)) * 2, 4)
+    # La réserve ne compte que les vidéos RÉELLEMENT publiables : mêmes
+    # conditions que le pipeline (rendu présent ET miniature Vortex valide).
+    # Compter les autres remplirait la réserve de rendus que la publication
+    # refuse, l'habillage s'arrêterait et plus rien ne sortirait jamais.
+    from .thumbs import valid_thumbnail
+    deja_prets = 0
+    for r in db.conn.execute(
+            "SELECT render_path, thumb_path FROM videos WHERE state = 'READY' "
+            "AND render_path IS NOT NULL"):
+        if (r["render_path"] and Path(r["render_path"]).is_file()
+                and valid_thumbnail(r["thumb_path"])):
+            deja_prets += 1
+    if deja_prets >= avance_max:
+        log.info("Réserve suffisante (%d vidéos publiables) — habillage en pause",
+                 deja_prets)
+        return 0
+
     rows = db.conn.execute(
         "SELECT id, render_path FROM videos WHERE state = 'READY' "
         "ORDER BY CASE WHEN duration_s BETWEEN 30 AND 180 THEN 0 ELSE 1 END, "
@@ -591,6 +614,9 @@ def render_pending(cfg: Config, db: Database, limit: int = 0) -> int:
     done = 0
     for r in rows:
         if limit and done >= limit:
+            break
+        if deja_prets + done >= avance_max:
+            log.info("Réserve atteinte (%d) — habillage interrompu", avance_max)
             break
         if r["render_path"] and Path(r["render_path"]).is_file():
             continue

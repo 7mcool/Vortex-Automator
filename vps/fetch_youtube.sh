@@ -17,6 +17,9 @@ fetch_channel() {
   MAX_DUR="$4"   # 0 = pas de limite haute
   LABEL="$5"
   DEST="$SRC_DIR/$C"
+  # Re-contrôlé AVANT CHAQUE téléchargement : la boucle en enchaîne dix, et un
+  # seul contrôle initial laisserait passer des dizaines de gigaoctets.
+  place_dispo || return 0
   mkdir -p "$DEST"
   echo "--- @$C/$TAB [$LABEL] (${MIN_DUR}s → ${MAX_DUR}s) ---"
 
@@ -50,15 +53,38 @@ fetch_channel() {
   fi
 }
 
-# Le découpeur ne traite qu'UNE source par passage. Sans garde-fou, le
-# téléchargement prendrait une avance que l'encodage ne rattraperait jamais et
-# remplirait le disque d'un serveur déjà à 89 %.
-EN_ATTENTE=$(find "$SRC_DIR" -name '*.mp4' 2>/dev/null | wc -l)
-MAX_ATTENTE="${YOUTUBE_MAX_BACKLOG:-3}"
-if [ "$EN_ATTENTE" -ge "$MAX_ATTENTE" ]; then
-  echo "$EN_ATTENTE source(s) déjà en attente de découpage — téléchargement suspendu"
-  exit 0
-fi
+# Le découpeur ne traite qu'UNE source par passage : sans garde-fou, le
+# téléchargement prend une avance que l'encodage ne rattrape jamais.
+#
+# Deux mesures, toutes deux en MÉGAOCTETS — compter des FICHIERS ne veut rien
+# dire quand un direct de 3 h 25 en 1080p pèse 7,5 Go à lui seul (mesuré le 29/07) :
+#   1. le retard de découpage (poids du dossier des sources) ;
+#   2. l'empreinte TOTALE de Vortex, et non l'espace libre du disque : celui-ci
+#      est partagé avec d'autres projets et frôle en permanence les 98 %, si bien
+#      qu'un seuil sur `df` suspendrait le téléchargement pour toujours.
+MAX_ATTENTE_MO="${YOUTUBE_MAX_BACKLOG_MO:-8192}"
+MAX_EMPREINTE_MO="${VORTEX_MAX_FOOTPRINT_MO:-14336}"
+
+mesure_mo() {   # poids d'un dossier, 0 s'il est absent ou illisible
+  V=$(du -sm "$1" 2>/dev/null | cut -f1)
+  case "$V" in ''|*[!0-9]*) echo 0 ;; *) echo "$V" ;; esac
+}
+
+place_dispo() {
+  ATTENTE_MO=$(mesure_mo "$SRC_DIR")
+  if [ "$ATTENTE_MO" -ge "$MAX_ATTENTE_MO" ]; then
+    echo "${ATTENTE_MO} Mo de sources en attente de découpage — téléchargement suspendu"
+    return 1
+  fi
+  EMPREINTE_MO=$(( $(mesure_mo /app/videos) + $(mesure_mo /app/data) ))
+  if [ "$EMPREINTE_MO" -ge "$MAX_EMPREINTE_MO" ]; then
+    echo "Vortex occupe ${EMPREINTE_MO} Mo (plafond ${MAX_EMPREINTE_MO}) — téléchargement suspendu"
+    return 1
+  fi
+  return 0
+}
+
+place_dispo || exit 0
 
 # L'archive `.archive.txt` de chaque chaîne fait tout le travail de mémoire :
 # yt-dlp descend la liste du plus récent au plus ancien et s'arrête au premier
