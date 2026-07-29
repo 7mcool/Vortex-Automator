@@ -105,7 +105,12 @@ def harvest_portraits(source: Path, duration: float, limit: int = 10) -> int:
             if len(faces) != 1:
                 continue
             x, y, face_w, face_h = [int(v) for v in faces[0]]
-            if face_w * face_h < width * height * 0.018:
+            # Critère en PIXELS, pas en fraction de l'image. Sur une source
+            # 1080p, un visage de 160 px est parfaitement exploitable mais ne
+            # représente que 1,2 % de la surface : l'ancien seuil de 1,8 %
+            # rejetait la totalité des images, et la bibliothèque de portraits
+            # restait donc vide (constaté le 29/07 sur une vidéo entière).
+            if face_w < 140:
                 continue
             face_gray = gray[y:y + face_h, x:x + face_w]
             sharpness = float(cv2.Laplacian(face_gray, cv2.CV_64F).var())
