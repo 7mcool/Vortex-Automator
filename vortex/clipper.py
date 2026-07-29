@@ -251,7 +251,7 @@ def _ask_clips(cfg: Config, segs: list, duration: float,
     tous: list[dict] = []
     evenement = ""
     debut = segs[0][0]
-    numero = 0
+    numero = ratees = 0
     while debut < duration:
         fin_fenetre = debut + fenetre_s
         tranche = [s for s in segs if s[0] >= debut and s[1] <= fin_fenetre]
@@ -261,10 +261,21 @@ def _ask_clips(cfg: Config, segs: list, duration: float,
         numero += 1
         clips, evt = _ask_clips_fenetre(cfg, tranche, duration, titre_source)
         evenement = evenement or evt
+        if not clips:
+            ratees += 1
         log.info("Fenêtre %d (%.0f-%.0f min) : %d extrait(s)",
                  numero, tranche[0][0] / 60, tranche[-1][1] / 60, len(clips))
         tous.extend(clips)
+    if ratees:
+        log.error("%d fenêtre(s) sur %d n'ont rien donné — la source sera conservée",
+                  ratees, numero)
+    _ask_clips.fenetres_ratees = ratees
     return tous, evenement
+
+
+# Nombre de fenêtres restées sans extrait au dernier appel. `process_one_source`
+# s'en sert pour ne pas effacer une source encore exploitable.
+_ask_clips.fenetres_ratees = 0
 
 
 def _ask_clips_fenetre(cfg: Config, segs: list, duration: float,
@@ -287,11 +298,12 @@ def _ask_clips_fenetre(cfg: Config, segs: list, duration: float,
     # v4-pro raisonne (reasoning_tokens ~1500-2000 avant la sortie) : gros budget
     # obligatoire sinon la réflexion épuise max_tokens et le JSON est tronqué → 0 extrait.
     big_budget = reasoner or "pro" in model
-    # Chaque extrait pèse ~350 caractères de JSON ; trente en réclament donc bien
-    # plus que le budget d'origine, réflexion comprise.
-    budget = 8000 if big_budget else 5000
-    if max_clips > 12:
-        budget = 16000 if big_budget else 10000
+    # deepseek-v4-pro RAISONNE avant de répondre, et cette réflexion se paie sur
+    # max_tokens. Sur une fenêtre de trois quarts d'heure elle consommait la
+    # totalité du budget : la réponse revenait VIDE avec finish_reason=length —
+    # zéro caractère, donc « aucun extrait » sans explication. Le budget doit
+    # couvrir la réflexion ET la sortie, pas seulement la sortie.
+    budget = 24000 if big_budget else 10000
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": CLIP_PROMPT.format(
@@ -839,17 +851,33 @@ def process_one_source(cfg: Config, db: Database) -> int:
     except Exception as exc:
         log.warning("Collecte de portraits ignorée pour %s : %s", src.name, exc)
 
+    # Des fenêtres restées muettes signifient que des passages entiers du sermon
+    # n'ont pas été examinés. Effacer la source rendrait la perte définitive :
+    # la conférence Sophos du 28/07 a ainsi perdu trois quarts d'heure de contenu
+    # sur cinq, pour 7,5 Go à retélécharger. On archive donc le résultat partiel
+    # — pour ne pas reprendre le découpage à zéro — mais on garde la vidéo.
+    fenetres_ratees = getattr(_ask_clips, "fenetres_ratees", 0)
+    complet = all_complete and made == total and not fenetres_ratees
+
     db.conn.execute("INSERT OR REPLACE INTO clip_sources VALUES (?, datetime('now'), ?)",
                     (str(src), made))
     db.conn.commit()
+
+    if not complet:
+        log.warning(
+            "Source conservée : %d fenêtre(s) sans extrait, %d/%d montage(s) réussi(s). "
+            "Relancer le découpage reprendra la transcription en cache.",
+            fenetres_ratees, made, total)
+        return made
+
     # Libère l'espace « au fur et à mesure » (demande de Michel) : une source de
-    # sermon pèse souvent 0,5–2 Go et devient inutile DÈS que ses extraits sont créés.
-    # On la supprime tout de suite (avec son .info.json) au lieu d'attendre le cron
-    # nocturne, pour ne jamais saturer le disque du VPS partagé. L'archive de
-    # téléchargement (.archive.txt) est conservée : elle évite de re-télécharger.
+    # sermon pèse souvent 0,5–7 Go et devient inutile DÈS que ses extraits sont créés.
+    # L'archive de téléchargement (.archive.txt) est conservée : elle évite de
+    # re-télécharger. Le cache de transcription part avec la vidéo qu'il décrit.
     try:
         src.unlink(missing_ok=True)
         src.with_suffix(".info.json").unlink(missing_ok=True)
+        src.with_suffix(".segments.json").unlink(missing_ok=True)
         log.info("Source supprimée (espace libéré) : %s", src.name)
     except OSError as exc:
         log.warning("Suppression de la source impossible (%s) : %s", src.name, exc)
