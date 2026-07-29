@@ -236,27 +236,52 @@ def _parse_json_obj(content: str) -> dict:
 
 def _ask_clips(cfg: Config, segs: list, duration: float,
                titre_source: str = "") -> tuple[list[dict], str]:
+    """Sélection des extraits, par fenêtres successives du sermon.
+
+    Un direct de 3 h 25 ne tient pas dans un seul appel : la transcription
+    était tronquée à 90 000 caractères — plus de la moitié du sermon échappait
+    à l'IA — et il fallait lui faire produire trente extraits d'un coup, ce qui
+    épuisait le budget de tokens et rendait la réponse inexploitable.
+    On découpe donc en fenêtres d'environ trois quarts d'heure, analysées
+    l'une après l'autre : tout le sermon est vu, et chaque réponse reste courte.
+    """
+    if not segs:
+        return [], ""
+    fenetre_s = float(getattr(cfg, "clip_window_seconds", 0) or 2700)   # 45 min
+    tous: list[dict] = []
+    evenement = ""
+    debut = segs[0][0]
+    numero = 0
+    while debut < duration:
+        fin_fenetre = debut + fenetre_s
+        tranche = [s for s in segs if s[0] >= debut and s[1] <= fin_fenetre]
+        debut = fin_fenetre
+        if len(tranche) < 5:
+            continue
+        numero += 1
+        clips, evt = _ask_clips_fenetre(cfg, tranche, duration, titre_source)
+        evenement = evenement or evt
+        log.info("Fenêtre %d (%.0f-%.0f min) : %d extrait(s)",
+                 numero, tranche[0][0] / 60, tranche[-1][1] / 60, len(clips))
+        tous.extend(clips)
+    return tous, evenement
+
+
+def _ask_clips_fenetre(cfg: Config, segs: list, duration: float,
+                       titre_source: str = "") -> tuple[list[dict], str]:
     key = os.environ.get("DEEPSEEK_API_KEY")
     if not key:
         log.error("DEEPSEEK_API_KEY absent — clipper indisponible")
         return [], ""
     lines = [f"[{s:.0f}-{e:.0f}] {t}" for s, e, t in segs]
     transcript = "\n".join(lines)
-    if len(transcript) > 90000:  # ~2 h de sermon max par appel
-        # Tronquer sans le dire laissait croire que l'IA avait vu tout le
-        # sermon : sur un direct de 3 h 25, plus de la moitié lui échappait.
-        garde = transcript[:90000].rsplit("\n", 1)[0]
-        couvert = float(garde.rsplit("[", 1)[-1].split("-", 1)[0] or 0)
-        log.warning(
-            "Transcription tronquée : %d caractères sur %d — l'IA ne voit que "
-            "les %.0f premières minutes sur %.0f",
-            len(garde), len(transcript), couvert / 60, duration / 60)
-        transcript = garde
-    # Décision de Michel (29/07) : pas de plafond arbitraire, on garde tout ce qui
-    # le mérite. Le nombre suit donc la durée — environ un extrait par sept minutes
-    # de sermon. Le maximum reste borné parce que la réponse doit tenir dans
-    # max_tokens : au-delà, le JSON serait tronqué et l'appel perdu.
-    max_clips = max(3, min(30, int(duration // 420)))
+    if len(transcript) > 90000:
+        transcript = transcript[:90000].rsplit("\n", 1)[0]
+        log.warning("Fenêtre tronquée à %d caractères", len(transcript))
+    # Environ un extrait par sept minutes de la FENÊTRE. Une réponse courte
+    # tient dans le budget de tokens, réflexion du modèle comprise.
+    couverte = segs[-1][1] - segs[0][0]
+    max_clips = max(2, min(8, int(couverte // 420)))
     model = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-pro")
     reasoner = "reasoner" in model
     # v4-pro raisonne (reasoning_tokens ~1500-2000 avant la sortie) : gros budget
