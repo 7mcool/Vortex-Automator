@@ -6,11 +6,13 @@
 set -u
 cd /opt/vortex/repo || exit 1
 
-BOT_TOKEN=""
-# Récupère le token du bot trading MT5 s'il existe
+# Canal Telegram COMMUN à tous les projets de Michel : le bot et le salon
+# vivent dans /opt/mt5-monitor/monitor.env. Les noms exacts sont TELEGRAM_TOKEN
+# et TELEGRAM_CHAT — l'ancien code cherchait TELEGRAM_BOT_TOKEN et un salon
+# codé en dur, si bien qu'aucune alerte n'est jamais partie.
 [ -f /opt/mt5-monitor/monitor.env ] && . /opt/mt5-monitor/monitor.env
-BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
-CHAT_ID="8641117832"  # Michel
+BOT_TOKEN="${TELEGRAM_TOKEN:-}"
+CHAT_ID="${TELEGRAM_CHAT:-}"
 
 STATUS_FILE="/opt/vortex/repo/data/health_status.txt"
 PROBLEMS=""

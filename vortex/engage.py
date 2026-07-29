@@ -48,21 +48,38 @@ def _deepseek_json(prompt: str) -> dict | None:
     key = os.environ.get("DEEPSEEK_API_KEY")
     if not key:
         return None
-    body = json.dumps({
-        "model": "deepseek-chat",
+    # Même modèle que le reste du projet : « deepseek-chat » n'existe plus et
+    # retombait silencieusement sur le modèle rapide.
+    modele = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-pro")
+    raisonne = "pro" in modele or "reasoner" in modele
+    charge = {
+        "model": modele,
         "messages": [{"role": "user", "content": prompt}],
-        "response_format": {"type": "json_object"},
-        "temperature": 1.1,
-        "max_tokens": 200,
-    }).encode()
+        # 200 jetons ne suffisaient pas : un modèle qui raisonne les consomme
+        # avant même d'écrire, et la réponse revenait vide ou tronquée.
+        "max_tokens": 4000 if raisonne else 600,
+    }
+    if not raisonne:
+        charge["response_format"] = {"type": "json_object"}
+        charge["temperature"] = 1.1
+    body = json.dumps(charge).encode()
     try:
         req = urllib.request.Request(
             "https://api.deepseek.com/chat/completions", data=body,
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
         )
-        with urllib.request.urlopen(req, timeout=60) as r:
+        with urllib.request.urlopen(req, timeout=120) as r:
             resp = json.load(r)
-        return json.loads(resp["choices"][0]["message"]["content"])
+        # Le modèle entoure parfois son JSON de texte ou de balises ```json :
+        # `json.loads` échouait alors sur « Extra data », et l'engagement
+        # retombait sur ses formules génériques (constaté le 29/07).
+        from .ai import _parse_json_obj
+        contenu = resp["choices"][0]["message"]["content"] or ""
+        objet = _parse_json_obj(contenu)
+        if not objet:
+            log.warning("Réponse d'engagement illisible : %s", contenu[:150])
+            return None
+        return objet
     except Exception as exc:
         log.warning("DeepSeek engagement indisponible : %s", exc)
         return None
