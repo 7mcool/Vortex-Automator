@@ -56,6 +56,8 @@ if (-not $attente) { Write-Host "Aucun habillage en attente - rien a faire."; re
 Write-Host "$($attente.Count) extrait(s) a habiller"
 
 # Rapatrier les sources et leurs annexes (mots horodates pour les sous-titres).
+# Meme precaution : scp signale ses avertissements sur la sortie d erreur.
+$ErrorActionPreference = "Continue"
 foreach ($v in $attente) {
     $nom = Split-Path $v.path -Leaf
     $local = "$app\videos\hedjav\$nom"
@@ -136,6 +138,11 @@ print(json.dumps([dict(r) for r in db.execute(q, ids)]))
 "@
 $faits = python -c $lecture | ConvertFrom-Json
 
+# ssh, scp et docker ecrivent tous des avertissements sur la sortie d'erreur.
+# Avec ErrorActionPreference a "Stop", PowerShell prend chacun pour une panne
+# fatale et interrompt l'envoi alors que tout s'est bien passe. On juge donc
+# sur les codes de retour pendant toute cette phase.
+$ErrorActionPreference = "Continue"
 $renvoyes = 0
 foreach ($f in $faits) {
     if (-not $f.render_path) { continue }
@@ -166,4 +173,5 @@ foreach ($f in $faits) {
     Remove-Item -LiteralPath $rendu -Force -ErrorAction SilentlyContinue
 }
 
+$ErrorActionPreference = "Stop"
 Write-Host "$renvoyes habillage(s) renvoye(s) au serveur."
