@@ -45,6 +45,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="nombre de vidéos à traiter (défaut : 5)")
     parser.add_argument("--live", action="store_true",
                         help="désactive la simulation pour `publish` (upload réel, privé)")
+    parser.add_argument("--maintenant", action="store_true",
+                        help="publie tout de suite, hors grille horaire "
+                             "(contenu d'actualité : conférence, direct du jour)")
     parser.add_argument("--config", default=None, help="chemin du config.toml")
     args = parser.parse_args(argv)
 
@@ -77,7 +80,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.command == "publish" and not args.live:
                 print("`publish` sans --live = simulation. Ajoute --live pour envoyer réellement.")
             plan = plan_batch(cfg, db, args.count)
-            execute_plan(cfg, db, plan, live=live)
+            execute_plan(cfg, db, plan, live=live, tout_de_suite=args.maintenant)
 
         elif args.command == "engage":
             from .engage import run_engagement

@@ -17,14 +17,18 @@ import json
 import logging
 import re
 import unicodedata
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .config import Config
 from .db import Database
-from .schedule import next_free_slots, rfc3339_utc
+from .schedule import immediate_slots, next_free_slots, rfc3339_utc
 from . import youtube_client
 
 log = logging.getLogger("vortex.pipeline")
+
+# Curseur des publications immédiates, avancé à chaque vidéo du lot.
+_prochain_immediat = [None]
 
 
 # ------------------------------------------------------------ anti-republication
@@ -120,8 +124,14 @@ def _is_quota_error(err) -> bool:
     return getattr(getattr(err, "resp", None), "status", None) == 403
 
 
-def execute_plan(cfg: Config, db: Database, plan: list[dict], live: bool) -> None:
-    """Exécute le plan. live=False -> simulation pure (affichage seulement)."""
+def execute_plan(cfg: Config, db: Database, plan: list[dict], live: bool,
+                 tout_de_suite: bool = False) -> None:
+    """Exécute le plan. live=False -> simulation pure (affichage seulement).
+
+    tout_de_suite : sort de la grille horaire et publie à quelques minutes
+    d'intervalle. Réservé au contenu d'actualité — une conférence de la
+    veille n'attend pas que les créneaux des jours suivants se libèrent.
+    """
     if not plan:
         log.info("Rien à programmer (aucune vidéo READY éligible).")
         return
@@ -169,7 +179,12 @@ def execute_plan(cfg: Config, db: Database, plan: list[dict], live: bool) -> Non
             log.error("Publication bloquée pour %s : miniature Vortex absente", row_check["name"])
             continue
         # Créneau recalculé maintenant : jamais de publishAt déjà passé.
-        slots = next_free_slots(cfg, db, 1)
+        slots = (immediate_slots(1, now=_prochain_immediat[0]) if tout_de_suite
+                 else next_free_slots(cfg, db, 1))
+        if tout_de_suite:
+            # Chaque vidéo décale la suivante : sans cela toutes
+            # partiraient à la même minute.
+            _prochain_immediat[0] = slots[0] + timedelta(minutes=14)
         if not slots:
             log.error("Aucun créneau disponible — arrêt.")
             break
