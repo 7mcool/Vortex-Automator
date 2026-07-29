@@ -46,12 +46,27 @@ Voici la transcription HORODATÉE (en secondes) d'une longue vidéo ({duration:.
 
 {transcript}
 
+Titre de la vidéo source : « {titre_source} »
+
 Propose jusqu'à {max_clips} EXTRAITS à découper, en JSON strict :
-{{"clips": [{{"start": <s>, "end": <s>, "type": "court|moyen|long|sequence",
+{{"evenement": "le nom de l'événement, tiré du titre source (ex : « Conférence Sophos 2026 », \
+« Soirées de réveil de Yaoundé »). Vide si la vidéo n'appartient à aucun événement.",
+ "clips": [{{"start": <s>, "end": <s>, "type": "court|moyen|long|sequence",
   "sujet": "le thème doctrinal en 2-4 mots (ex : « le pardon », « la dîme », « la foi qui agit »)",
+  "serie": "voir SÉRIES ci-dessous — le plus souvent une chaîne vide",
   "title": "titre YouTube accrocheur fidèle (60-85 caractères)",
   "hook": "l'affirmation choc qui OUVRE l'extrait (max 90 caractères)",
   "description": "2-3 phrases fidèles au contenu"}}]}}
+
+SÉRIES — à utiliser avec PARCIMONIE.
+Une série regroupe 2 à 5 extraits CONSÉCUTIFS qui forment un récit à suspense : un
+enseignement qui se déroule en étapes, une histoire drôle ou saisissante, un témoignage
+qui monte, une démonstration qui appelle une suite. Ces extraits porteront « Partie 1/3 »,
+« Partie 2/3 »… et un appel à voir la suite.
+- donne à chaque extrait de la série LE MÊME libellé dans "serie" (ex : « Guéhazi et la lèpre ») ;
+- laisse "serie" VIDE pour tout extrait qui se suffit à lui-même — c'est le cas le plus fréquent ;
+- ne crée une série QUE si la coupure donne vraiment envie de voir la suite. Une série
+  artificielle fait fuir l'audience : dans le doute, laisse vide.
 
 STRUCTURE OBLIGATOIRE DE CHAQUE EXTRAIT — c'est la règle la plus importante.
 Tout extrait doit contenir, DANS CET ORDRE :
@@ -194,7 +209,8 @@ def _parse_json_obj(content: str) -> dict:
     return {}
 
 
-def _ask_clips(cfg: Config, segs: list, duration: float) -> list[dict]:
+def _ask_clips(cfg: Config, segs: list, duration: float,
+               titre_source: str = "") -> tuple[list[dict], str]:
     key = os.environ.get("DEEPSEEK_API_KEY")
     if not key:
         log.error("DEEPSEEK_API_KEY absent — clipper indisponible")
@@ -221,7 +237,8 @@ def _ask_clips(cfg: Config, segs: list, duration: float) -> list[dict]:
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": CLIP_PROMPT.format(
-            duration=duration, transcript=transcript, max_clips=max_clips)}],
+            duration=duration, transcript=transcript, max_clips=max_clips,
+            titre_source=titre_source or "(inconnu)")}],
         "max_tokens": budget,
     }
     if not reasoner:  # deepseek-reasoner ignore/rejette temperature + response_format
@@ -234,10 +251,12 @@ def _ask_clips(cfg: Config, segs: list, duration: float) -> list[dict]:
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=300) as r:
             resp = json.load(r)
-        clips = _parse_json_obj(resp["choices"][0]["message"]["content"]).get("clips", [])
+        reponse = _parse_json_obj(resp["choices"][0]["message"]["content"])
+        clips = reponse.get("clips", [])
+        evenement = str(reponse.get("evenement", "")).strip()[:80]
     except Exception as exc:
         log.error("DeepSeek clipper échoué : %s", exc)
-        return []
+        return [], ""
     # Validation : bornes calées sur les segments réels, durées plausibles
     starts = [s for s, _, _ in segs]
     ends = [e for _, e, _ in segs]
@@ -260,10 +279,41 @@ def _ask_clips(cfg: Config, segs: list, duration: float) -> list[dict]:
                       # Thème doctrinal : c'est la clé qui permettra plus tard de
                       # rassembler des extraits de sermons différents sur un sujet.
                       "sujet": str(c.get("sujet", "")).strip()[:60],
+                      # Libellé de série : seuls les extraits qui le partagent
+                      # recevront « Partie i/N ».
+                      "serie": str(c.get("serie", "")).strip()[:80],
                       "title": str(c.get("title", "")).strip()[:95],
                       "hook": str(c.get("hook", "")).strip()[:90],
                       "description": str(c.get("description", "")).strip()[:500]})
-    return valid
+    return valid, evenement
+
+
+def _numeroter_series(clips: list[dict]) -> None:
+    """Attribue « Partie i/N » aux seuls extraits qui appartiennent à une série.
+
+    Michel (29/07) : le suspense ne doit pas s'appliquer à tout, seulement aux
+    passages qui donnent vraiment envie de voir la suite. Un extrait sans
+    libellé de série, ou seul de son libellé, sort donc sans numérotation.
+    """
+    groupes: dict[str, list[dict]] = {}
+    for clip in clips:
+        libelle = clip.get("serie", "")
+        if libelle:
+            groupes.setdefault(libelle, []).append(clip)
+
+    for clip in clips:
+        clip["part"] = 0
+        clip["total"] = 0
+    for libelle, membres in groupes.items():
+        if len(membres) < 2:
+            # Une « série » d'un seul extrait n'a pas de suite à annoncer.
+            membres[0]["serie"] = ""
+            continue
+        membres.sort(key=lambda c: c["start"])
+        for rang, clip in enumerate(membres, start=1):
+            clip["part"] = rang
+            clip["total"] = len(membres)
+        log.info("Série « %s » : %d parties", libelle, len(membres))
 
 
 def _face_center_x(path: str, at: float, width: int, height: int) -> float:
@@ -561,13 +611,23 @@ def process_one_source(cfg: Config, db: Database) -> int:
         # retentée au passage suivant (modèle indisponible, audio illisible, etc.).
         log.error("Transcription vide pour %s — source conservée pour reprise", src.name)
         return 0
-    clips = _ask_clips(cfg, segs, duration)
-    # Ordre CHRONOLOGIQUE : Partie 1 = le passage le plus tôt dans le sermon, etc.
-    # → une vraie série « Partie 1/2/3 » qui suit le déroulé de la prédication.
+    # Le titre officiel donne à l'IA le nom de l'événement (« Conférence Sophos
+    # 2026 »), qui servira de playlist.
+    try:
+        from .portraits import speaker_from_info
+        _, infos_source = speaker_from_info(src)
+        titre_source = str(infos_source.get("title") or "")
+    except Exception:
+        titre_source = ""
+
+    clips, evenement = _ask_clips(cfg, segs, duration, titre_source)
     clips.sort(key=lambda c: c["start"])
     clips = _sans_chevauchement(clips)
+    # « Partie i/N » réservée aux extraits que l'IA a réunis en série.
+    _numeroter_series(clips)
     total = len(clips)
-    log.info("%d extraits proposés par DeepSeek", total)
+    log.info("%d extraits retenus%s", total,
+             f" — événement : {evenement}" if evenement else "")
 
     src_w, src_h = _probe_dims(str(src))
     chan = src.parent.name
@@ -587,12 +647,14 @@ def process_one_source(cfg: Config, db: Database) -> int:
         stem = f"clip_{chan}_{src.stem[:24]}_{i}_{int(c['start'])}"
         # Indice pasteur dans la légende (l'IA nomme si cohérent, sinon écarte l'invité)
         prefix = f"Prédication de {pastor}. " if pastor else ""
-        # part/total : marqueurs de série lus par metadata.py pour ajouter
-        # « Partie i/N » + le CTA suspense « la suite sur YouTube ».
+        # part/total viennent de la SÉRIE, pas du rang dans le sermon : un
+        # extrait autonome sort sans « Partie i/N » (décision de Michel, 29/07).
         info = {"description": f"{prefix}{c['title']} — {c['hook']} {c['description']}",
-                "part": i, "total": total,
-                # Conservé pour le regroupement thématique d'extraits venus de
-                # sermons différents (chantier à venir).
+                "part": c.get("part", 0), "total": c.get("total", 0),
+                "serie": c.get("serie", ""),
+                # L'événement devient la playlist YouTube ; le sujet servira au
+                # regroupement d'extraits venus de sermons différents.
+                "evenement": evenement,
                 "sujet": c.get("sujet", ""), "type": c.get("type", "")}
         # Montage réel : les pauses >0,7 s sont retirées, avec punch-ins légers
         # et nouveau cadrage visage à chaque plan. Les anciennes fonctions
@@ -618,8 +680,9 @@ def process_one_source(cfg: Config, db: Database) -> int:
             out_v.with_name(out_v.stem + ".info.json").write_text(json.dumps(
                 {"title": c["title"], "hook": c["hook"],
                  "description": c["description"], "type": c.get("type", ""),
-                 "sujet": c.get("sujet", ""),
-                 "part": i, "total": total},
+                 "sujet": c.get("sujet", ""), "serie": c.get("serie", ""),
+                 "evenement": evenement,
+                 "part": c.get("part", 0), "total": c.get("total", 0)},
                 ensure_ascii=False), encoding="utf-8")
             # 2b) le vertical part AUSSI en YouTube SHORT si ≤ 180 s (décision Michel :
             #     vertical = YouTube Short + TikTok ; horizontal = YouTube classique).
@@ -632,7 +695,11 @@ def process_one_source(cfg: Config, db: Database) -> int:
                     out_s.with_name(short_stem + ".info.json").write_text(
                         json.dumps({"description": f"{prefix}{c['title']} — {c['hook']} "
                                     f"{c['description']}", "format": "short",
-                                   "part": i, "total": total},
+                                    "serie": c.get("serie", ""),
+                                    "evenement": evenement,
+                                    "sujet": c.get("sujet", ""),
+                                    "part": c.get("part", 0),
+                                    "total": c.get("total", 0)},
                                    ensure_ascii=False), encoding="utf-8")
                     short_created = True
                 except OSError as exc:

@@ -216,6 +216,16 @@ def execute_plan(cfg: Config, db: Database, plan: list[dict], live: bool) -> Non
             except Exception as exc:
                 log.warning("Sous-titres refusés pour %s : %s", row["name"], exc)
 
+        # Rangement par événement : les dizaines d'extraits d'une conférence se
+        # perdraient sinon dans le flux de la chaîne.
+        try:
+            from . import playlists
+            classee = playlists.classer(db, service, row["path"], youtube_id)
+            if classee:
+                log.info("Playlist « %s » : %s ajoutée", classee, row["name"])
+        except Exception as exc:
+            log.warning("Classement en playlist ignoré pour %s : %s", row["name"], exc)
+
         db.set_state(p["video_id"], "SCHEDULED", f"programmé {publish_at}",
                      youtube_id=youtube_id, publish_at=publish_at)
         db.record_channel_video(youtube_id, row["title"] or "", publish_at)
