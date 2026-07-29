@@ -153,10 +153,13 @@ foreach ($f in $faits) {
         scp @ssh $f.thumb_path "${cible}:$distant/data/thumbs/"
         if ($LASTEXITCODE -eq 0) { $distThumb = "/app/data/thumbs/$nomThumb" }
     }
-    $sql = "UPDATE videos SET render_path='$distRendu'"
-    if ($distThumb) { $sql += ", thumb_path='$distThumb'" }
-    $sql += " WHERE id=$($f.id);"
-    ssh @ssh $cible "cd $distant && docker compose -f docker-compose.vps.yml run --rm --no-deps vortex python3 -c `"import sqlite3; d=sqlite3.connect('/app/data/vortex.db'); d.execute(\`"$sql\`"); d.commit()`"" | Out-Null
+    # Un script cote serveur prend des arguments simples : empiler les
+    # guillemets de PowerShell, de SSH, du shell distant et de Python cassait
+    # systematiquement des qu'une parenthese apparaissait.
+    $maj = "cd $distant; docker compose -f docker-compose.vps.yml run --rm --no-deps " +
+           "vortex python3 /app/vps/maj_rendu.py $($f.id) '$distRendu' '$distThumb'"
+    ssh @ssh $cible $maj | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Warning "  base non mise a jour : $nomRendu"; continue }
     $renvoyes++
 
     # L'extrait vit desormais sur le serveur : inutile de le garder en double.
