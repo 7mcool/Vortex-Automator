@@ -50,10 +50,26 @@ fetch_channel() {
   fi
 }
 
-# Pour chaque chaîne : sermons LONGS (/streams, ≥20 min) + cours (/videos, 3-20 min)
-for CHAN in "lamaisondesagesse" "cfrèresc" "EgliseGénérationDaniel" "ÉgliseVasesdHonneur"; do
-  fetch_channel "$CHAN" "streams" 1200 0 "long"
-  fetch_channel "$CHAN" "videos" 180 1200 "court"
+# Le découpeur ne traite qu'UNE source par passage. Sans garde-fou, le
+# téléchargement prendrait une avance que l'encodage ne rattraperait jamais et
+# remplirait le disque d'un serveur déjà à 89 %.
+EN_ATTENTE=$(find "$SRC_DIR" -name '*.mp4' 2>/dev/null | wc -l)
+MAX_ATTENTE="${YOUTUBE_MAX_BACKLOG:-3}"
+if [ "$EN_ATTENTE" -ge "$MAX_ATTENTE" ]; then
+  echo "$EN_ATTENTE source(s) déjà en attente de découpage — téléchargement suspendu"
+  exit 0
+fi
+
+# L'archive `.archive.txt` de chaque chaîne fait tout le travail de mémoire :
+# yt-dlp descend la liste du plus récent au plus ancien et s'arrête au premier
+# élément non encore téléchargé. Les nouveautés passent donc en priorité, et le
+# fonds ancien se comble tout seul, passage après passage, jusqu'à épuisement
+# de la chaîne.
+for CHAN in "JACAMESSANLIVE" "lamaisondesagesse" "cfrèresc" \
+            "EgliseGénérationDaniel" "ÉgliseVasesdHonneur"; do
+  fetch_channel "$CHAN" "streams" 1200 0 "live-long"
+  # Hors direct : tout ce qui dépasse trois minutes, court comme long.
+  fetch_channel "$CHAN" "videos" 180 0 "hors-live"
 done
 
 echo "fetch_youtube terminé"

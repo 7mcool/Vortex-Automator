@@ -46,19 +46,41 @@ Voici la transcription HORODATÉE (en secondes) d'une longue vidéo ({duration:.
 
 {transcript}
 
-Propose entre 3 et {max_clips} EXTRAITS à découper, en JSON strict :
-{{"clips": [{{"start": <s>, "end": <s>, "type": "choc|enseignement|temoignage|message_complet",
+Propose jusqu'à {max_clips} EXTRAITS à découper, en JSON strict :
+{{"clips": [{{"start": <s>, "end": <s>, "type": "court|moyen|long|sequence",
+  "sujet": "le thème doctrinal en 2-4 mots (ex : « le pardon », « la dîme », « la foi qui agit »)",
   "title": "titre YouTube accrocheur fidèle (60-85 caractères)",
-  "hook": "la phrase la plus forte de l'extrait (max 90 caractères)",
+  "hook": "l'affirmation choc qui OUVRE l'extrait (max 90 caractères)",
   "description": "2-3 phrases fidèles au contenu"}}]}}
 
-RÈGLES ABSOLUES :
+STRUCTURE OBLIGATOIRE DE CHAQUE EXTRAIT — c'est la règle la plus importante.
+Tout extrait doit contenir, DANS CET ORDRE :
+  1. une AFFIRMATION CHOC — une déclaration forte, surprenante ou tranchante du prédicateur.
+     L'extrait COMMENCE dessus (ou une phrase avant), jamais au milieu d'un développement ;
+  2. son EXPLICATION COMPLÈTE — le prédicateur justifie, développe, illustre, cite l'Écriture.
+     L'explication doit aller jusqu'à son terme : sa longueur naturelle décide de la durée ;
+  3. une FIN NETTE — conclusion, application ou retombée de l'enseignement.
+
+Un extrait qui pose une affirmation SANS l'expliquer est à REJETER.
+Un extrait qui explique quelque chose SANS affirmation d'ouverture est à REJETER.
+
+DURÉES — elles découlent de l'explication, jamais d'un gabarit :
+- "court"    : 90 à 150 s   — l'affirmation et son explication tiennent en peu de mots ;
+- "moyen"    : 150 à 300 s  — explication développée, avec une application ;
+- "long"     : 300 à 600 s  — explication + illustration ou témoignage + conclusion ;
+- "sequence" : 600 à 900 s  — un raisonnement entier qu'on ne peut pas couper sans le mutiler.
+JAMAIS moins de 90 secondes. Si l'explication du prédicateur dure sept minutes, prends sept
+minutes : ne tronque pas un raisonnement pour tenir dans un format.
+
+AUTRES RÈGLES ABSOLUES :
 - start/end doivent tomber sur des DÉBUTS/FINS de phrases visibles dans la transcription
   (utilise les horodatages fournis) — jamais au milieu d'une phrase ;
-- chaque extrait doit se comprendre SEUL (contexte inclus si nécessaire) ;
-- durées cibles : 40-70 s (choc), 60-180 s (enseignement/témoignage), 300-600 s (message complet) ;
-- pas de chevauchement entre extraits ; choisis les passages les PLUS forts ;
-- aucun extrait incompréhensible ou coupé brutalement.
+- chaque extrait doit se comprendre SEUL, sans avoir vu le reste du sermon ;
+- pas de chevauchement entre extraits ;
+- ne force pas le nombre : prends TOUS les passages qui méritent d'être gardés, et
+  seulement ceux-là. Un sermon riche en donnera beaucoup, un sermon pauvre très peu ;
+- le champ "sujet" servira plus tard à regrouper des extraits de sermons différents
+  sur un même thème : sois précis et cohérent d'un extrait à l'autre.
 
 ✅ À GARDER (contenu spirituel fort et édifiant) : ENSEIGNEMENT biblique, EXHORTATION,
 TÉMOIGNAGES, et les TEMPS DE PRIÈRE / DÉCLARATIONS / BÉNÉDICTIONS / INTERCESSION /
@@ -181,17 +203,26 @@ def _ask_clips(cfg: Config, segs: list, duration: float) -> list[dict]:
     transcript = "\n".join(lines)
     if len(transcript) > 90000:  # ~2 h de sermon max par appel
         transcript = transcript[:90000]
-    max_clips = 8 if duration > 1200 else 5
+    # Décision de Michel (29/07) : pas de plafond arbitraire, on garde tout ce qui
+    # le mérite. Le nombre suit donc la durée — environ un extrait par sept minutes
+    # de sermon. Le maximum reste borné parce que la réponse doit tenir dans
+    # max_tokens : au-delà, le JSON serait tronqué et l'appel perdu.
+    max_clips = max(3, min(30, int(duration // 420)))
     model = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-pro")
     reasoner = "reasoner" in model
     # v4-pro raisonne (reasoning_tokens ~1500-2000 avant la sortie) : gros budget
     # obligatoire sinon la réflexion épuise max_tokens et le JSON est tronqué → 0 extrait.
     big_budget = reasoner or "pro" in model
+    # Chaque extrait pèse ~350 caractères de JSON ; trente en réclament donc bien
+    # plus que le budget d'origine, réflexion comprise.
+    budget = 8000 if big_budget else 5000
+    if max_clips > 12:
+        budget = 16000 if big_budget else 10000
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": CLIP_PROMPT.format(
             duration=duration, transcript=transcript, max_clips=max_clips)}],
-        "max_tokens": 8000 if big_budget else 5000,
+        "max_tokens": budget,
     }
     if not reasoner:  # deepseek-reasoner ignore/rejette temperature + response_format
         payload["response_format"] = {"type": "json_object"}
@@ -217,10 +248,18 @@ def _ask_clips(cfg: Config, segs: list, duration: float) -> list[dict]:
             end = min(ends, key=lambda x: abs(x - float(c["end"])))
         except (KeyError, ValueError, TypeError):
             continue
-        if end - start < 25 or end - start > 620 or start >= end:
+        # Plancher à 90 s : en dessous, l'affirmation choc n'a pas la place
+        # d'être expliquée, et c'est l'explication qui fait la valeur de
+        # l'extrait (décision de Michel, 29/07). Plafond à 900 s pour le format
+        # « sequence ». Une marge de 5 s absorbe le calage sur les segments.
+        longueur = end - start
+        if longueur < 85 or longueur > 900 or start >= end:
             continue
         valid.append({"start": start, "end": end,
-                      "type": str(c.get("type", "enseignement"))[:20],
+                      "type": str(c.get("type", "moyen"))[:20],
+                      # Thème doctrinal : c'est la clé qui permettra plus tard de
+                      # rassembler des extraits de sermons différents sur un sujet.
+                      "sujet": str(c.get("sujet", "")).strip()[:60],
                       "title": str(c.get("title", "")).strip()[:95],
                       "hook": str(c.get("hook", "")).strip()[:90],
                       "description": str(c.get("description", "")).strip()[:500]})
@@ -551,7 +590,10 @@ def process_one_source(cfg: Config, db: Database) -> int:
         # part/total : marqueurs de série lus par metadata.py pour ajouter
         # « Partie i/N » + le CTA suspense « la suite sur YouTube ».
         info = {"description": f"{prefix}{c['title']} — {c['hook']} {c['description']}",
-                "part": i, "total": total}
+                "part": i, "total": total,
+                # Conservé pour le regroupement thématique d'extraits venus de
+                # sermons différents (chantier à venir).
+                "sujet": c.get("sujet", ""), "type": c.get("type", "")}
         # Montage réel : les pauses >0,7 s sont retirées, avec punch-ins légers
         # et nouveau cadrage visage à chaque plan. Les anciennes fonctions
         # existaient mais n'étaient jamais appelées.
@@ -575,7 +617,8 @@ def process_one_source(cfg: Config, db: Database) -> int:
             vertical_len = _probe_duration(out_v) or clip_len
             out_v.with_name(out_v.stem + ".info.json").write_text(json.dumps(
                 {"title": c["title"], "hook": c["hook"],
-                 "description": c["description"], "type": c["type"],
+                 "description": c["description"], "type": c.get("type", ""),
+                 "sujet": c.get("sujet", ""),
                  "part": i, "total": total},
                 ensure_ascii=False), encoding="utf-8")
             # 2b) le vertical part AUSSI en YouTube SHORT si ≤ 180 s (décision Michel :
