@@ -54,7 +54,34 @@ forcer.
 | 13/07/2026 | Refusée | Scopes mismatch — la vidéo de démo ne montrait pas tous les périmètres |
 | 23/07/2026 | Soumise | Correctif : `video.publish` retiré, nouvelle démo en sandbox |
 | 29/07/2026 | **Refusée** | Site trop mince (page d'atterrissage), politique de confidentialité et conditions jugées insuffisantes, icône absente du favicon et de l'en-tête des pages légales |
-| 30/07/2026 | Corrigé | Site reconstruit : 5 pages, politiques développées, favicon et icône en en-tête |
+| 30/07/2026 | **Soumise** | Site reconstruit ; **In review** confirmé sur le portail |
+
+## Piège rencontré à la resoumission (30/07)
+
+« Return to Draft » **efface l'icône de l'application**. « Import → Import from
+Sandbox » restaure le nom, les quatre URL et la description courte, mais **pas
+l'icône** — et il **réintroduit tous les périmètres du sandbox**, y compris
+`video.publish`, `user.info.profile`, `user.info.stats` et `video.list`.
+
+C'est exactement ce qui avait causé le premier refus (« scopes mismatch ») : des
+périmètres demandés que ni la démo ni la justification ne couvrent. Après un
+import, il faut donc **systématiquement** :
+
+1. retirer à la main `user.info.profile`, `user.info.stats`, `video.list`
+   (bouton « − » sur la page Scopes) ;
+2. désactiver **Direct Post** dans Products → Content Posting API — c'est lui
+   qui apporte `video.publish`, non retirable depuis la page Scopes ;
+3. réinjecter l'icône : le champ fichier est masqué, on passe par
+   `DataTransfer` depuis `https://sophos.hedjav.com/logo-1024.png` ;
+4. réinjecter la vidéo de démo depuis
+   `https://sophos.hedjav.com/sophos-publisher-demo.mp4` ;
+5. remplir la justification (1000 caractères max) **en décrivant les
+   changements de cette révision** — le formulaire le demande explicitement ;
+6. « Save », vérifier le message « Saved », puis « Submit for review » et
+   renseigner le motif (120 caractères max).
+
+Les champs React ignorent une affectation directe de `value` : passer par le
+setter natif du prototype puis émettre `input` et `change`.
 
 ## Ce que le relecteur exigeait, et ce qui a été fait
 
