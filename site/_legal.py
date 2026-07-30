@@ -1,69 +1,14 @@
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Confidentialité — Sophos Publisher</title>
-<meta name="description" content="Sophos Publisher : outil de publication assistée des prédications du ministère Sophos PropheTikos.">
-<link rel="icon" href="favicon.ico" sizes="any">
-<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
-<link rel="apple-touch-icon" href="apple-touch-icon.png">
-<style>
-:root{--fond:#0d0d12;--carte:#16161f;--trait:#2a2a38;--encre:#e9e9f0;
-      --doux:#9b9bab;--or:#d4a843;--lien:#7fb3ff}
-*{box-sizing:border-box;margin:0;padding:0}
-html{scroll-behavior:smooth}
-body{background:var(--fond);color:var(--encre);
-     font:16px/1.65 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
-a{color:var(--lien);text-decoration:none}
-a:hover{text-decoration:underline}
-.bandeau{border-bottom:1px solid var(--trait);background:#0a0a0f;
-         position:sticky;top:0;z-index:10}
-.bandeau .dedans{max-width:920px;margin:0 auto;padding:14px 22px;
-                 display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-.marque{display:flex;align-items:center;gap:12px;font-weight:700;font-size:1.05rem}
-.marque img{width:42px;height:42px;border-radius:9px;display:block}
-nav{margin-left:auto;display:flex;gap:18px;flex-wrap:wrap;font-size:.92rem}
-nav a{color:var(--doux)}
-nav a.ici{color:var(--or)}
-main{max-width:920px;margin:0 auto;padding:38px 22px 60px}
-h1{font-size:1.85rem;line-height:1.25;margin-bottom:10px}
-h2{font-size:1.2rem;margin:34px 0 12px;padding-bottom:7px;
-   border-bottom:1px solid var(--trait)}
-h3{font-size:1.02rem;margin:22px 0 8px;color:var(--or)}
-p,li{color:#d3d3de}
-p{margin:12px 0}
-ul,ol{margin:12px 0 12px 22px}
-li{margin:7px 0}
-.chapo{color:var(--doux);font-size:1.05rem;margin-bottom:26px}
-.encart{background:var(--carte);border:1px solid var(--trait);
-        border-radius:11px;padding:18px 20px;margin:22px 0}
-.encart h3{margin-top:0}
-.grille{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));margin:22px 0}
-.duo{display:flex;align-items:center;gap:16px;margin-bottom:26px}
-.duo img{width:76px;height:76px;border-radius:14px;flex:0 0 auto}
-table{width:100%;border-collapse:collapse;margin:18px 0;font-size:.93rem}
-th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--trait);vertical-align:top}
-th{color:var(--or);font-weight:600}
-code{background:#0a0a10;border:1px solid var(--trait);border-radius:5px;
-     padding:1px 6px;font-size:.9em}
-.date{color:var(--doux);font-size:.88rem}
-footer{border-top:1px solid var(--trait);margin-top:50px}
-footer .dedans{max-width:920px;margin:0 auto;padding:26px 22px;
-               color:var(--doux);font-size:.88rem;
-               display:flex;gap:16px;justify-content:space-between;flex-wrap:wrap}
-footer nav{margin:0;gap:16px}
-@media(max-width:620px){h1{font-size:1.5rem}nav{width:100%;margin-left:0}}
-</style>
-</head>
-<body>
-<header class="bandeau"><div class="dedans">
-  <span class="marque"><img src="logo-1024.png" alt="Icône de Sophos Publisher">Sophos Publisher</span>
-  <nav><a href="index.html">Accueil</a><a href="fonctionnement.html">Comment ça marche</a><a href="chaine.html">Notre chaîne</a><a href="privacy.html" class='ici'>Confidentialité</a><a href="terms.html">Conditions</a></nav>
-</div></header>
-<main>
-<div class="duo"><img src="logo-1024.png" alt="Icône de Sophos Publisher"><div><h1>Politique de confidentialité</h1><p class="date">Dernière mise à jour : 30 juillet 2026</p></div></div>
+"""Politique de confidentialite et conditions d'utilisation.
 
+Le relecteur TikTok a juge les deux precedentes « insuffisantes » : elles
+tenaient en quelques lignes. Ces versions couvrent ce qu'une revue attend —
+qui traite, quelles donnees, pourquoi, combien de temps, avec qui, quels
+droits, et comment nous joindre.
+"""
+
+CONTACT = "hedjav@gmail.com"
+
+PRIVACY = """
 <p class="chapo">Sophos Publisher est un outil interne du ministère Sophos
 PropheTikos. Cette politique décrit précisément quelles données il manipule,
 pourquoi, et pendant combien de temps.</p>
@@ -72,7 +17,7 @@ pourquoi, et pendant combien de temps.</p>
 <p>Le responsable du traitement est le ministère <strong>Sophos
 PropheTikos</strong>, établi à Cotonou (Bénin). Pour toute question relative à
 cette politique ou à l'exercice de vos droits :
-<a href="mailto:hedjav@gmail.com">hedjav@gmail.com</a>.</p>
+<a href="mailto:%(contact)s">%(contact)s</a>.</p>
 
 <h2>2. À qui s'adresse cet outil</h2>
 <p>Sophos Publisher n'est pas un service ouvert au public. Il est utilisé
@@ -149,7 +94,7 @@ artificielle :</p>
 <h2>7. Vos droits</h2>
 <p>Vous pouvez nous demander l'accès aux données vous concernant, leur
 rectification, leur effacement, ou vous opposer à leur traitement. Écrivez à
-<a href="mailto:hedjav@gmail.com">hedjav@gmail.com</a> ; nous répondons sous trente jours.</p>
+<a href="mailto:%(contact)s">%(contact)s</a> ; nous répondons sous trente jours.</p>
 <p>Si un extrait vous concerne et que vous souhaitez son retrait, indiquez-nous
 le lien : nous le retirons le temps d'examiner la demande.</p>
 
@@ -171,12 +116,79 @@ où elles opèrent.</p>
 <p>Toute modification de cette politique sera publiée sur cette page, avec sa
 date de mise à jour. Les changements substantiels seront signalés en tête de
 page.</p>
+""" % {"contact": CONTACT}
 
-</main>
-<footer><div class="dedans">
-  <span>Sophos Publisher — ministère Sophos PropheTikos, Cotonou (Bénin)</span>
-  <nav><a href="privacy.html">Confidentialité</a><a href="terms.html">Conditions</a>
-       <a href="mailto:hedjav@gmail.com">Contact</a></nav>
-</div></footer>
-</body>
-</html>
+
+TERMS = """
+<p class="chapo">Ces conditions encadrent l'usage de Sophos Publisher, outil
+interne du ministère Sophos PropheTikos.</p>
+
+<h2>1. Objet</h2>
+<p>Sophos Publisher prépare des extraits de prédications et les dépose sur les
+comptes du ministère Sophos PropheTikos. Il s'agit d'un outil interne : il n'est
+ni vendu, ni loué, ni mis à disposition du public.</p>
+
+<h2>2. Qui peut l'utiliser</h2>
+<p>Seuls les responsables du ministère, expressément autorisés. Aucune
+inscription n'est ouverte. L'outil ne comporte aucun mécanisme permettant à une
+personne extérieure de connecter un compte ou de déclencher une publication.</p>
+
+<h2>3. Comptes visés</h2>
+<p>L'outil publie exclusivement sur les comptes du ministère. Il n'agit jamais
+au nom d'un tiers, ne publie jamais sur le compte d'autrui, et ne propose aucun
+service de publication à des tiers.</p>
+
+<h2>4. Contenus et droits</h2>
+<ul>
+  <li>Les prédications proviennent des enregistrements du ministère ou de
+  ministères partenaires ayant donné leur accord.</li>
+  <li>Chaque extrait crédite le prédicateur et son église, et renvoie à la vidéo
+  d'origine.</li>
+  <li>Un prédicateur n'est nommé que si son identité est établie avec certitude.
+  Dans le doute, l'extrait paraît sans attribution.</li>
+  <li>Toute réclamation relative aux droits sur un contenu peut être adressée à
+  <a href="mailto:%(contact)s">%(contact)s</a>. Le contenu contesté est retiré le
+  temps de l'examen.</li>
+</ul>
+
+<h2>5. Usages interdits</h2>
+<p>Il est exclu d'employer cet outil pour :</p>
+<ul>
+  <li>publier sur un compte qui n'appartient pas au ministère ;</li>
+  <li>diffuser un contenu haineux, trompeur, violent ou illicite ;</li>
+  <li>solliciter des paiements : les passages appelant aux dons ou contenant des
+  coordonnées de paiement sont écartés automatiquement des extraits ;</li>
+  <li>contourner les règles des plateformes destinataires, ou automatiser une
+  interaction que celles-ci n'autorisent pas.</li>
+</ul>
+
+<h2>6. Règles des plateformes</h2>
+<p>L'usage de l'outil reste soumis aux conditions des plateformes concernées,
+notamment les <a href="https://www.tiktok.com/legal/terms-of-service"
+rel="noopener">conditions de TikTok</a> et ses règles pour les développeurs. En
+cas de contradiction, les règles de la plateforme prévalent.</p>
+
+<h2>7. Interruptions</h2>
+<p>L'outil peut être arrêté, modifié ou indisponible à tout moment, notamment
+lors d'une maintenance ou d'une panne de nos serveurs. Aucune continuité de
+service n'est garantie, l'usage étant strictement interne.</p>
+
+<h2>8. Responsabilité</h2>
+<p>L'outil est fourni en l'état, pour l'usage propre du ministère. Le ministère
+demeure responsable des contenus qu'il publie sur ses comptes. Aucune garantie
+n'est donnée quant à l'audience, la portée ou la disponibilité des contenus sur
+les plateformes.</p>
+
+<h2>9. Données personnelles</h2>
+<p>Le traitement des données est décrit dans notre
+<a href="privacy.html">politique de confidentialité</a>, qui fait partie
+intégrante de ces conditions.</p>
+
+<h2>10. Modifications</h2>
+<p>Ces conditions peuvent être modifiées. La version en vigueur est celle publiée
+sur cette page, avec sa date de mise à jour.</p>
+
+<h2>11. Droit applicable et contact</h2>
+<p>Ces conditions sont régies par le droit béninois. Pour toute question :
+<a href="mailto:%(contact)s">%(contact)s</a>.</p>
+""" % {"contact": CONTACT}

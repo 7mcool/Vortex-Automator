@@ -1,14 +1,38 @@
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Accueil — Sophos Publisher</title>
-<meta name="description" content="Sophos Publisher : outil de publication assistée des prédications du ministère Sophos PropheTikos.">
-<link rel="icon" href="favicon.ico" sizes="any">
-<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
-<link rel="apple-touch-icon" href="apple-touch-icon.png">
-<style>
+"""Genere le site de Sophos Publisher, exige par la revue TikTok.
+
+Le relecteur a refuse l'application le 29/07 pour quatre motifs, tous relatifs
+au site :
+
+  - l'URL ne devait pas etre une simple page d'atterrissage, mais un site
+    reellement developpe et accessible publiquement ;
+  - la politique de confidentialite etait juge insuffisante ;
+  - les conditions d'utilisation etaient jugees insuffisantes ;
+  - l'icone de l'application devait apparaitre dans l'onglet du navigateur ET
+    en haut des pages legales.
+
+Ce generateur produit donc un gabarit commun — en-tete avec l'icone, favicon,
+navigation, pied de page — et cinq pages de contenu reel.
+
+    python site/_gabarit.py        # ecrit les .html a cote
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+RACINE = Path(__file__).resolve().parent
+MAJ = "30 juillet 2026"
+CONTACT = "hedjav@gmail.com"
+
+PAGES = [
+    ("index.html", "Accueil", "Sophos Publisher — publication assistée pour les ministères"),
+    ("fonctionnement.html", "Comment ça marche", "Comment fonctionne Sophos Publisher"),
+    ("chaine.html", "Notre chaîne", "La chaîne Sophos PropheTikos"),
+    ("privacy.html", "Confidentialité", "Politique de confidentialité"),
+    ("terms.html", "Conditions", "Conditions d'utilisation"),
+]
+
+STYLE = """
 :root{--fond:#0d0d12;--carte:#16161f;--trait:#2a2a38;--encre:#e9e9f0;
       --doux:#9b9bab;--or:#d4a843;--lien:#7fb3ff}
 *{box-sizing:border-box;margin:0;padding:0}
@@ -54,65 +78,47 @@ footer .dedans{max-width:920px;margin:0 auto;padding:26px 22px;
                display:flex;gap:16px;justify-content:space-between;flex-wrap:wrap}
 footer nav{margin:0;gap:16px}
 @media(max-width:620px){h1{font-size:1.5rem}nav{width:100%;margin-left:0}}
-</style>
+"""
+
+
+def page(fichier: str, titre: str, h1: str, corps: str, legal: bool = False) -> str:
+    liens = "".join(
+        f'<a href="{f}"{" class=\'ici\'" if f == fichier else ""}>{n}</a>'
+        for f, n, _ in PAGES
+    )
+    # Sur les pages legales, l'icone doit etre visible EN HAUT du contenu, pas
+    # seulement dans le bandeau : c'est une exigence explicite du relecteur.
+    entete = (
+        f'<div class="duo"><img src="logo-1024.png" alt="Icône de Sophos Publisher">'
+        f'<div><h1>{h1}</h1><p class="date">Dernière mise à jour : {MAJ}</p></div></div>'
+        if legal else f"<h1>{h1}</h1>"
+    )
+    return f"""<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{titre} — Sophos Publisher</title>
+<meta name="description" content="Sophos Publisher : outil de publication assistée des prédications du ministère Sophos PropheTikos.">
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<style>{STYLE}</style>
 </head>
 <body>
 <header class="bandeau"><div class="dedans">
   <span class="marque"><img src="logo-1024.png" alt="Icône de Sophos Publisher">Sophos Publisher</span>
-  <nav><a href="index.html" class='ici'>Accueil</a><a href="fonctionnement.html">Comment ça marche</a><a href="chaine.html">Notre chaîne</a><a href="privacy.html">Confidentialité</a><a href="terms.html">Conditions</a></nav>
+  <nav>{liens}</nav>
 </div></header>
 <main>
-<h1>Sophos Publisher</h1>
-
-<p class="chapo">Sophos Publisher est l'outil interne du ministère
-<strong>Sophos PropheTikos</strong>. Il prépare et met en ligne les extraits de
-prédications sur nos propres comptes, pour que l'équipe passe son temps à
-enseigner plutôt qu'à manipuler des fichiers vidéo.</p>
-
-<h2>À quoi sert cet outil</h2>
-<p>Notre ministère diffuse des prédications en français, à destination du public
-francophone d'Afrique de l'Ouest. Une prédication dure souvent deux à trois
-heures : personne ne la regarde en entier sur un téléphone. Sophos Publisher
-en tire des extraits courts et autonomes, les habille de sous-titres, puis les
-publie sur nos comptes.</p>
-
-<div class="grille">
-  <div class="encart"><h3>Découper avec du sens</h3>
-  <p>Chaque extrait porte une affirmation forte <em>et</em> son explication
-  complète. Jamais une phrase coupée au milieu.</p></div>
-
-  <div class="encart"><h3>Rendre lisible sans le son</h3>
-  <p>Sous-titres synchronisés mot à mot, car la majorité de notre audience
-  regarde sans écouter.</p></div>
-
-  <div class="encart"><h3>Publier à heures régulières</h3>
-  <p>Six mises en ligne par jour, échelonnées, sur nos propres comptes
-  uniquement.</p></div>
-</div>
-
-<h2>Ce que l'outil ne fait pas</h2>
-<ul>
-  <li>Il ne publie <strong>que</strong> sur les comptes du ministère. Il n'agit
-  jamais au nom d'un tiers.</li>
-  <li>Il n'est pas proposé au public : aucune inscription, aucun compte à créer,
-  aucun service vendu.</li>
-  <li>Il ne collecte aucune donnée sur les personnes qui regardent nos vidéos.</li>
-</ul>
-
-<div class="encart">
-<h3>Qui sommes-nous</h3>
-<p>Sophos PropheTikos est un ministère chrétien basé à Cotonou, au Bénin. Nous
-diffusons des enseignements, des témoignages et des temps de prière. Les
-prédications proviennent de nos propres enregistrements et de ministères
-partenaires qui nous en ont donné l'autorisation.</p>
-<p>Contact : <a href="mailto:hedjav@gmail.com">hedjav@gmail.com</a></p>
-</div>
-
+{entete}
+{corps}
 </main>
 <footer><div class="dedans">
   <span>Sophos Publisher — ministère Sophos PropheTikos, Cotonou (Bénin)</span>
   <nav><a href="privacy.html">Confidentialité</a><a href="terms.html">Conditions</a>
-       <a href="mailto:hedjav@gmail.com">Contact</a></nav>
+       <a href="mailto:{CONTACT}">Contact</a></nav>
 </div></footer>
 </body>
 </html>
+"""
