@@ -1,42 +1,42 @@
-"""Covers v3 — « studio web » : maquettes HTML/CSS de niveau design,
-rendues par un vrai Chrome invisible (Playwright) sur le serveur.
+"""Covers v6 — maquette HTML/CSS rendue par un Chrome invisible (Playwright).
 
 Chaîne par vidéo :
-1. choix de la MEILLEURE image : détection de visage (OpenCV) sur 8 images,
-   on garde celle au visage le plus grand/net ;
-2. détourage du sujet (rembg) avec halo lumineux ;
-3. titre court percutant (thumb_title de DeepSeek, sinon repli titre long) ;
-4. injection dans une des 3 maquettes (styles/couleurs variés par vidéo) ;
-5. photo de la maquette par Chrome -> JPG 1280×720.
+1. accroche courte (`thumb_title` de DeepSeek, sinon repli `derive_thumb_title`) ;
+2. décor choisi selon l'ambiance du message (`thumb_theme`) ou photo du pasteur ;
+3. mise en page ADAPTÉE au format demandé — 16:9 pour les vidéos, 9:16 pour les
+   Shorts — puis photo de la maquette par Chrome (×3 → UHD).
+
+Deux pannes réparées le 30/07/2026 (« les miniatures sont bad », Michel) :
+
+* la maquette était figée à 1280×720 alors que le format vertical la
+  photographiait dans une fenêtre 720×1280 : le texte sortait du cadre à droite
+  et la moitié basse restait vide. Toute la géométrie est désormais calculée
+  à partir des dimensions réelles demandées ;
+* la police d'affichage (« Anton ») n'était installée nulle part sur le serveur.
+  Chrome retombait sur un sans-serif large, bien plus encombrant que la taille
+  estimée en Python : les lignes débordaient. La police est maintenant EMBARQUÉE
+  dans la page (base64), et la taille du texte n'est plus estimée mais MESURÉE
+  par le navigateur : on essaie toutes les coupes de lignes possibles et on
+  garde celle qui autorise le plus gros texte tenant dans le cadre.
 """
 
 from __future__ import annotations
 
 import base64
 import html as html_mod
-import io
+import json
 import logging
-import subprocess
-import tempfile
 from pathlib import Path
 
 from .config import Config
 from .db import Database
-from .textdetect import find_ffmpeg
 
 log = logging.getLogger("vortex.thumbs")
 
+# Espace de dessin (la capture est faite à ×3 → 3840×2160 ou 2160×3840).
 W, H = 1280, 720
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
-
-# (fond dégradé, couleur accent titre, couleur lueur) — varie par vidéo
-THEMES = [
-    ("linear-gradient(125deg,#2a0845 0%,#5b1a8a 55%,#8e2bc0 100%)", "#ffd23e", "#c05cff"),
-    ("linear-gradient(120deg,#071e4a 0%,#0d3aa0 55%,#2a6bf0 100%)", "#ffe14d", "#4d9dff"),
-    ("linear-gradient(130deg,#3d0714 0%,#7a1028 55%,#c22045 100%)", "#ffd23e", "#ff5c7a"),
-    ("linear-gradient(125deg,#04241a 0%,#0b5c3f 55%,#15996a 100%)", "#ffe14d", "#2fe0a0"),
-    ("linear-gradient(120deg,#121216 0%,#26262e 55%,#3d3d4d 100%)", "#ffc93e", "#8f8fb8"),
-]
+FONTS_DIR = ASSETS_DIR / "fonts"
 
 
 def _b64(data: bytes, mime: str = "image/png") -> str:
@@ -58,80 +58,35 @@ def valid_thumbnail(path: str | Path | None) -> bool:
         return False
 
 
-def _extract_frames(video: str, duration: float, n: int = 8) -> list[bytes]:
-    ffmpeg = find_ffmpeg()
-    frames = []
-    with tempfile.TemporaryDirectory() as tmp:
-        for i in range(n):
-            t = duration * (0.12 + 0.76 * i / max(n - 1, 1))
-            out = Path(tmp) / f"f{i}.png"
-            subprocess.run([ffmpeg, "-v", "quiet", "-ss", f"{t:.1f}", "-i", video,
-                            "-frames:v", "1", "-vf", "scale=-2:900", "-y", str(out)],
-                           capture_output=True, timeout=60)
-            if out.exists():
-                frames.append(out.read_bytes())
-    return frames
+_FONT_CACHE: str | None = None
 
 
-def _best_face_frame(frames: list[bytes]) -> bytes | None:
-    """L'image au plus grand visage (OpenCV). None si aucun visage nulle part."""
-    try:
-        import cv2
-        import numpy as np
-    except ImportError:
-        return frames[len(frames) // 3] if frames else None
-    cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-    best, best_area = None, 0
-    for data in frames:
-        img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
-        if img is None:
-            continue
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        faces = cascade.detectMultiScale(gray, 1.1, 5, minSize=(60, 60))
-        for (x, y, fw, fh) in faces:
-            if fw * fh > best_area:
-                best_area, best = fw * fh, data
-    if best is None and frames:
-        return frames[len(frames) // 3]
-    return best
+def _font_face() -> str:
+    """Police d'affichage EMBARQUÉE dans la page.
+
+    Le conteneur n'a aucune police installée (`/usr/share/fonts` est vide) :
+    sans cet embarquement, Chrome dessine avec son sans-serif de secours, large
+    et banal — c'est ce qui faisait déborder le texte des covers.
+    """
+    global _FONT_CACHE
+    if _FONT_CACHE is None:
+        ttf = FONTS_DIR / "Anton-Regular.ttf"
+        if ttf.is_file():
+            _FONT_CACHE = (
+                "@font-face{font-family:'CoverDisplay';font-style:normal;font-weight:400;"
+                f"src:url({_b64(ttf.read_bytes(), 'font/ttf')}) format('truetype');}}"
+            )
+        else:
+            log.warning("Police %s absente — rendu avec le sans-serif de secours", ttf.name)
+            _FONT_CACHE = ""
+    return _FONT_CACHE
 
 
-def _cutout_png(frame: bytes) -> bytes:
-    """Sujet détouré (rembg), retourné en PNG transparent. Repli : image brute."""
-    from PIL import Image
-    try:
-        from rembg import remove
-        img = Image.open(io.BytesIO(frame)).convert("RGBA")
-        cut = remove(img)
-        alpha = cut.getchannel("A")
-        if sum(alpha.point(lambda a: 1 if a > 128 else 0).getdata()) < 8000:
-            raise ValueError("détourage vide")
-        # recadre sur le sujet
-        bbox = alpha.getbbox()
-        if bbox:
-            cut = cut.crop(bbox)
-        buf = io.BytesIO()
-        cut.save(buf, "PNG")
-        return buf.getvalue()
-    except Exception as exc:
-        log.info("Détourage impossible (%s) — photo carte", exc)
-        img = Image.open(io.BytesIO(frame)).convert("RGB")
-        buf = io.BytesIO()
-        img.save(buf, "PNG")
-        return buf.getvalue()
-
-
-def _split_title(title: str) -> tuple[str, str]:
-    words = title.replace(" #Shorts", "").strip().upper().split()
-    if len(words) <= 3:
-        return " ".join(words), ""
-    cut = max(2, len(words) // 2)
-    return " ".join(words[:cut]), " ".join(words[cut:])
-
-
+# Mots qui portent la tension du message : ils passent en rouge.
 IMPACT_WORDS = {"PAS", "JAMAIS", "ERREUR", "DANGER", "BLOQUE", "BLOQUES", "ATTENTION",
-                "STOP", "FAUX", "PIÈGE", "PIEGE", "PÉCHÉ", "PECHE", "MORT", "PERDU", "PERDUES"}
-
+                "STOP", "FAUX", "PIÈGE", "PIEGE", "PÉCHÉ", "PECHE", "MORT", "PERDU",
+                "PERDUES", "REFUSE", "TUE", "MENSONGE", "SECRET", "CACHÉE", "CACHÉ",
+                "RIEN", "TROP", "TARD"}
 
 STOP_TAIL = {":", "-", "—", "LA", "LE", "LES", "DE", "DES", "DU", "ET", "OU",
              "AVEC", "POUR", "QUI", "QUE", "EN", "UN", "UNE", "TA", "TON", "TES"}
@@ -150,31 +105,13 @@ def _short_words(title: str, max_words: int = 6) -> list[str]:
     return words or ["MESSAGE", "PUISSANT"]
 
 
-def _impact_lines(title: str, accent: str = "#ffd23e") -> str:
-    """Texte COURT en 2-3 lignes : lignes alternées BLANC / couleur d'ACCENT (variée
-    par vidéo), mots d'impact en ROUGE (style des références de Michel)."""
-    words = [html_mod.escape(w) for w in _short_words(title)]
-    lines, line = [], []
-    per_line = 2 if len(words) <= 6 else 3
-    for w in words:
-        line.append(w)
-        if len(line) >= per_line:
-            lines.append(line)
-            line = []
-    if line:
-        lines.append(line)
-    out = []
-    for i, ln in enumerate(lines[:3]):
-        base = accent if i == 1 else "#ffffff"
-        spans = []
-        for w in ln:
-            color = "#ff2e2e" if w.rstrip("…!?.,") in IMPACT_WORDS else base
-            spans.append(f'<span style="color:{color}">{w}</span>')
-        out.append(" ".join(spans))
-    return "<br>".join(out)
+def _mots_json(title: str) -> str:
+    """Les mots de l'accroche + leur mise en couleur, pour le calage navigateur."""
+    mots = [{"t": w, "imp": w.rstrip("…!?.,") in IMPACT_WORDS} for w in _short_words(title)]
+    return json.dumps(mots, ensure_ascii=False)
 
 
-TINTS = [  # voile de couleur posé sur le fond photo (par vidéo)
+TINTS = [  # voile de couleur posé sur le décor (varié par vidéo)
     "rgba(30,6,50,.72)",   # violet nuit
     "rgba(5,10,40,.72)",   # bleu nuit
     "rgba(40,4,10,.74)",   # rouge sombre
@@ -233,129 +170,256 @@ def _fond_uri(video_id: int, theme: str = "") -> str:
     return _b64(fonds[video_id % len(fonds)].read_bytes(), "image/jpeg")
 
 
-def _html(cfg: Config, video_id: int, title: str, subject_uri: str, is_card: bool,
-          theme: str = "") -> str:
-    """Maquette v5 — reproduction des 7 références de Michel :
-    fond photo dramatique + voile coloré, PASTEUR PLEINE HAUTEUR,
-    texte COURT géant (blanc/or, mot d'impact rouge), trait doré,
-    nom du pasteur, logo de la chaîne, badge."""
-    tint = TINTS[video_id % len(TINTS)]
+# Script de calage : le navigateur MESURE le texte au lieu de laisser Python
+# l'estimer. Il essaie toutes les découpes en lignes possibles et retient celle
+# qui autorise le plus gros caractère tenant entièrement dans le cadre — plus
+# aucun mot ne peut sortir de l'image, quelle que soit la police réellement
+# utilisée ou la longueur de l'accroche.
+_FIT_JS = r"""
+const MOTS = @@MOTS@@, ACCENT = "@@ACCENT@@", ROUGE = "#ff2e2e";
+const zone = document.getElementById('zone');
+const titre = document.getElementById('titre');
+const trait = document.getElementById('trait');
+
+function batir(groupes) {
+  titre.innerHTML = '';
+  groupes.forEach(function (g, i) {
+    const ligne = document.createElement('div');
+    ligne.className = 'l';
+    g.forEach(function (m, j) {
+      const s = document.createElement('span');
+      s.textContent = m.t;
+      s.style.color = m.imp ? ROUGE : (i === 1 ? ACCENT : '#ffffff');
+      ligne.appendChild(s);
+      if (j < g.length - 1) ligne.appendChild(document.createTextNode(' '));
+    });
+    titre.appendChild(ligne);
+  });
+}
+
+function tient(taille, maxW, maxH) {
+  titre.style.fontSize = taille + 'px';
+  titre.style.webkitTextStroke = Math.max(3, Math.round(taille * 0.03)) + 'px rgba(0,0,0,.92)';
+  if (titre.scrollHeight > maxH) return false;
+  for (const l of titre.children) if (l.scrollWidth > maxW) return false;
+  return true;
+}
+
+function plusGrande(groupes, maxW, maxH) {
+  batir(groupes);
+  let bas = 18, haut = 460, meilleure = 0;
+  while (bas <= haut) {
+    const mid = (bas + haut) >> 1;
+    if (tient(mid, maxW, maxH)) { meilleure = mid; bas = mid + 1; } else { haut = mid - 1; }
+  }
+  return meilleure;
+}
+
+// Toutes les façons de couper les mots en n lignes, l'ordre étant conservé.
+function coupes(mots, n) {
+  if (n === 1) return [[mots.slice()]];
+  const res = [];
+  for (let i = 1; i <= mots.length - (n - 1); i++) {
+    for (const reste of coupes(mots.slice(i), n - 1)) res.push([mots.slice(0, i)].concat(reste));
+  }
+  return res;
+}
+
+function caler() {
+  const maxW = zone.clientWidth;
+  const maxH = zone.clientHeight - trait.offsetHeight - Math.round(zone.clientHeight * 0.06);
+  let meilleur = null, taille = 0;
+  for (let n = 1; n <= Math.min(MOTS.length, 4); n++) {
+    for (const g of coupes(MOTS, n)) {
+      const t = plusGrande(g, maxW, maxH);
+      // À taille égale on préfère la découpe la plus équilibrée (moins de
+      // lignes orphelines d'un seul mot).
+      if (t > taille) { taille = t; meilleur = g; }
+    }
+  }
+  if (!meilleur) { meilleur = [MOTS]; taille = 40; }
+  batir(meilleur);
+  tient(taille, maxW, maxH);
+  return { taille: taille, lignes: meilleur.length };
+}
+
+// La police doit être CHARGÉE avant de mesurer. `fonts.ready` ne suffit pas :
+// tant qu'aucun texte ne l'utilise, Chrome ne la télécharge pas, la promesse
+// est donc déjà tenue et le calage se faisait sur le sans-serif de secours,
+// bien plus large — d'où un texte final beaucoup plus petit que la place
+// disponible. On force donc son chargement, puis on mesure.
+if (document.fonts && document.fonts.load) {
+  document.fonts.load("400 100px CoverDisplay")
+    .then(function () { return document.fonts.ready; })
+    .then(function () { window.__calage = caler(); })
+    .catch(function () { window.__calage = caler(); });
+} else {
+  window.__calage = caler();
+}
+"""
+
+
+def _geometrie(w: int, h: int, avec_photo: bool) -> dict:
+    """Cadre de texte, logo et badge — calculés pour le format DEMANDÉ.
+
+    C'est ici que se jouait la panne : la maquette raisonnait toujours en
+    1280×720 même quand la capture était verticale.
+    """
+    marge = round(w * 0.05)
+    logo = round(min(w, h) * 0.135)
+    # Logo et badge se dimensionnent sur le PETIT côté : sinon le badge devient
+    # énorme en 9:16, où la hauteur est le grand côté.
+    badge_h = round(min(w, h) * 0.062)
+    vertical = h > w
+
+    if avec_photo and not vertical:
+        # Poster : photo sur une moitié, texte sur l'autre.
+        zone_w = round(w * 0.46)
+        zone_h = round(h * 0.66)
+        zone_top = round((h - zone_h) / 2)
+        zone_x = marge
+    elif avec_photo and vertical:
+        # Vertical : texte en HAUT, photo en bas — le visage reste entier. Le
+        # cadre de texte s'arrête là où le voile est encore opaque, sinon le
+        # trait d'accent venait se poser sur le front du pasteur.
+        zone_w = w - 2 * marge
+        zone_top = marge + logo + round(h * 0.02)
+        zone_h = round(h * 0.42) - zone_top
+        zone_x = marge
+    else:
+        zone_w = w - 2 * marge
+        zone_h = round(h * (0.62 if vertical else 0.64))
+        zone_top = round((h - zone_h) / 2)
+        zone_x = marge
+
+    return {
+        "marge": marge, "logo": logo, "badge_h": badge_h, "vertical": vertical,
+        "zone_w": zone_w, "zone_h": zone_h, "zone_top": zone_top, "zone_x": zone_x,
+    }
+
+
+def _html(cfg: Config, video_id: int, title: str, w: int, h: int,
+          theme: str = "", photo_uri: str = "") -> str:
+    """Maquette de cover : décor (ou photo du pasteur), accroche géante calée
+    par le navigateur, trait d'accent, logo de la chaîne et badge."""
     acc, rgb = COVER_ACCENTS[video_id % len(COVER_ACCENTS)]
-    fond = _fond_uri(video_id, theme)
-    left_side = video_id % 2 == 1  # pasteur à gauche ou à droite
+    tint = TINTS[video_id % len(TINTS)]
+    g = _geometrie(w, h, bool(photo_uri))
+    gauche = video_id % 2 == 1          # pasteur à gauche ou à droite
+    fond = "" if photo_uri else _fond_uri(video_id, theme)
+
     logo_uri = ""
     logo_file = ASSETS_DIR / "logo-chaine.png"
     if logo_file.exists():
         logo_uri = _b64(logo_file.read_bytes())
-    title_html = _impact_lines(title, acc)
-    short = _short_words(title)
-    n_words = len(short)
-    fs = 148 if n_words <= 4 else (124 if n_words <= 6 else 104)
-    # le mot le plus long doit tenir dans la zone de texte (0,62 × fs par caractère)
-    zone = W * (0.55 if subject_uri else 0.84)
-    longest = max((len(w) for w in short), default=8)
-    fs = min(fs, int(zone / (longest * 0.62)))
 
-    bg_css = (f"background:linear-gradient({tint},{tint}),url('{fond}') center/cover;"
-              if fond else f"background:linear-gradient(135deg,#14060f,#3a1030);")
-    subj_html = ""
-    if subject_uri:
-        side = "left:-2%" if left_side else "right:-2%"
-        subj_html = (f'<img style="position:absolute;{side};bottom:-8px;height:103%;z-index:2;'
-                     f'filter:drop-shadow(0 0 30px rgba(0,0,0,.85)) '
-                     f'drop-shadow(0 0 60px rgba(255,255,255,.14)) saturate(1.12) contrast(1.05);" '
-                     f'src="{subject_uri}">')
-    txt_pos = ("left:42%;right:3%" if left_side else "left:4%;right:42%") if subject_uri \
-        else "left:8%;right:8%"
+    # ---- décor -----------------------------------------------------------
+    if photo_uri:
+        # La photo se FOND dans le fond sombre par un masque dégradé, au lieu
+        # d'être recouverte d'un voile opaque : plus de couture au raccord, et
+        # surtout le visage garde sa lumière (il était noyé dans le noir).
+        if g["vertical"]:
+            photo_css = (
+                f"left:0;bottom:0;width:100%;height:78%;"
+                f"background:url('{photo_uri}') center/cover;"
+                f"-webkit-mask-image:linear-gradient(180deg,transparent 0%,#000 17%);"
+            )
+            voile_css = "display:none;"
+        else:
+            cote = "left" if gauche else "right"
+            sens = "90deg" if gauche else "270deg"
+            photo_css = (
+                f"{cote}:0;top:0;width:58%;height:100%;"
+                f"background:url('{photo_uri}') center top/cover;"
+                f"-webkit-mask-image:linear-gradient({sens},#000 78%,transparent 100%);"
+            )
+            voile_css = "display:none;"
+        fond_body = "#0b0712"
+    else:
+        photo_css = voile_css = "display:none;"
+        fond_body = (f"linear-gradient({tint},{tint}),url('{fond}') center/cover"
+                     if fond else "linear-gradient(135deg,#14060f,#3a1030)")
 
-    stroke = max(int(fs * 0.03), 3)
-    return f"""<!doctype html><html><head><meta charset="utf-8"><style>
-  * {{ margin:0; padding:0; box-sizing:border-box; }}
-  body {{ width:{W}px; height:{H}px; overflow:hidden; position:relative;
-         font-family:'Anton','Archivo Black','DejaVu Sans',sans-serif;
-         background:linear-gradient(135deg,#14060f,#3a1030); }}
-  .bg {{ position:absolute; inset:0; z-index:0; {bg_css}
-        filter:saturate(1.28) contrast(1.10) brightness(1.06); }}
-  .vig {{ position:absolute; inset:0; z-index:1;
-         background:radial-gradient(ellipse at 50% 44%, transparent 40%, rgba(0,0,0,.62) 100%),
-                    linear-gradient(0deg, rgba(0,0,0,.5), transparent 32%); }}
-  .txt {{ position:absolute; top:47%; transform:translateY(-50%); {txt_pos};
-         text-align:center; z-index:3; }}
-  h1 {{ font-size:{fs}px; line-height:1.08; letter-spacing:2px; color:#fff;
-       -webkit-text-stroke:{stroke}px rgba(0,0,0,.92);
-       text-shadow:0 4px 0 rgba(0,0,0,.55),0 12px 30px rgba(0,0,0,.8),
-                   0 0 40px rgba({rgb},.45); }}
-  .trait {{ width:64%; height:13px; margin:26px auto 0;
-           background:linear-gradient(90deg,transparent,{acc},#ffffff,{acc},transparent);
-           border-radius:8px; transform:skewX(-18deg);
-           box-shadow:0 0 28px rgba({rgb},.7); }}
-  .logo {{ position:absolute; top:24px; {'right:28px' if left_side else 'left:28px'};
-          width:96px; height:96px; border-radius:50%; border:4px solid #fff;
-          box-shadow:0 8px 20px rgba(0,0,0,.55); z-index:4; }}
-  .badge {{ position:absolute; bottom:26px; {'right:32px' if left_side else 'left:36px'};
-           background:{acc}; color:#0a0a12; z-index:4; font-weight:bold;
-           font-size:29px; padding:9px 24px; border-radius:34px;
-           border:3px solid #fff; box-shadow:0 10px 24px rgba(0,0,0,.5),0 0 22px rgba({rgb},.5); }}
+    # Le texte est posé sur un voile sombre : sur un décor chargé, l'accroche
+    # restait dure à lire (« couverture bad », Michel 30/07).
+    zone_cx = round((g["zone_x"] + g["zone_w"] / 2) / w * 100)
+    zone_cy = round((g["zone_top"] + g["zone_h"] / 2) / h * 100)
+
+    modele = r"""<!doctype html><html><head><meta charset="utf-8"><style>
+  @@FONT@@
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { width:@@W@@px; height:@@H@@px; overflow:hidden; position:relative;
+         font-family:'CoverDisplay','Anton','Archivo Black',sans-serif;
+         background:@@FOND_BODY@@; }
+  .photo { position:absolute; z-index:1; @@PHOTO@@
+           filter:saturate(1.20) contrast(1.08) brightness(1.04); }
+  .voile { position:absolute; z-index:2; @@VOILE@@ }
+  .vig { position:absolute; inset:0; z-index:3;
+         background:radial-gradient(ellipse at @@CX@@% @@CY@@%, rgba(0,0,0,.55) 0%,
+                    rgba(0,0,0,.34) 46%, transparent 72%),
+                    radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.52) 100%); }
+  #zone { position:absolute; left:@@ZX@@px; top:@@ZT@@px;
+          width:@@ZW@@px; height:@@ZH@@px; z-index:4;
+          display:flex; flex-direction:column; align-items:center;
+          justify-content:center; text-align:center; }
+  /* 1.14 et non 1.04 : en capitales accentuées (« DÉCLENCHE »), l'accent du É
+     venait toucher la ligne du dessus. */
+  #titre { width:100%; line-height:1.14; letter-spacing:1px;
+           text-shadow:0 4px 0 rgba(0,0,0,.55), 0 12px 30px rgba(0,0,0,.8),
+                       0 0 40px rgba(@@RGB@@,.45); }
+  #titre .l { white-space:nowrap; }
+  #trait { @@TRAIT_VIS@@ width:62%; height:@@TRAIT@@px; margin-top:@@TMARGE@@px; border-radius:8px;
+           transform:skewX(-16deg); flex:none;
+           background:linear-gradient(90deg,transparent,@@ACC@@,#ffffff,@@ACC@@,transparent);
+           box-shadow:0 0 26px rgba(@@RGB@@,.65); }
+  .logo { position:absolute; top:@@MARGE@@px; left:@@MARGE@@px; z-index:6;
+          width:@@LOGO@@px; height:@@LOGO@@px; border-radius:50%; border:4px solid #fff;
+          box-shadow:0 8px 20px rgba(0,0,0,.55); }
+  .badge { position:absolute; bottom:@@MARGE@@px; left:@@MARGE@@px; z-index:6;
+           background:@@ACC@@; color:#0a0a12; font-weight:bold; white-space:nowrap;
+           height:@@BADGE@@px; line-height:@@BADGE@@px; padding:0 @@BPAD@@px;
+           font-size:@@BFS@@px; border-radius:@@BRAD@@px; border:3px solid #fff;
+           font-family:'Archivo Black','DejaVu Sans',sans-serif;
+           box-shadow:0 10px 24px rgba(0,0,0,.5),0 0 22px rgba(@@RGB@@,.5); }
 </style></head><body>
-  <div class="bg"></div>
-  <div class="vig"></div>
-  {subj_html}
-  <div class="txt"><h1>{title_html}</h1><div class="trait"></div></div>
-  {f'<img class="logo" src="{logo_uri}">' if logo_uri else ''}
-  <div class="badge">{html_mod.escape(cfg.channel_name.upper())}</div>
+  <div class="photo"></div><div class="voile"></div><div class="vig"></div>
+  <div id="zone"><div id="titre"></div><div id="trait"></div></div>
+  @@LOGO_IMG@@
+  <div class="badge">@@CHAINE@@</div>
+  <script>@@JS@@</script>
 </body></html>"""
 
+    remplace = {
+        "@@FONT@@": _font_face(),
+        "@@W@@": str(w), "@@H@@": str(h),
+        "@@FOND_BODY@@": fond_body,
+        "@@PHOTO@@": photo_css, "@@VOILE@@": voile_css,
+        "@@CX@@": str(zone_cx), "@@CY@@": str(zone_cy),
+        "@@ZX@@": str(g["zone_x"]), "@@ZT@@": str(g["zone_top"]),
+        "@@ZW@@": str(g["zone_w"]), "@@ZH@@": str(g["zone_h"]),
+        # En 9:16 avec photo, le texte s'arrête juste au-dessus du visage : le
+        # trait d'accent venait alors barrer les yeux du pasteur.
+        "@@TRAIT_VIS@@": "display:none;" if (g["vertical"] and photo_uri) else "",
+        "@@TRAIT@@": str(max(6, round(min(w, h) * 0.018))),
+        "@@TMARGE@@": str(round(min(w, h) * 0.035)),
+        "@@ACC@@": acc, "@@RGB@@": rgb,
+        "@@MARGE@@": str(g["marge"]), "@@LOGO@@": str(g["logo"]),
+        "@@BADGE@@": str(g["badge_h"]),
+        "@@BPAD@@": str(round(g["badge_h"] * 0.55)),
+        "@@BFS@@": str(round(g["badge_h"] * 0.46)),
+        "@@BRAD@@": str(round(g["badge_h"] / 2)),
+        "@@LOGO_IMG@@": f'<img class="logo" src="{logo_uri}">' if logo_uri else "",
+        "@@CHAINE@@": _echappe(cfg.channel_name.upper()),
+        "@@JS@@": (_FIT_JS.replace("@@MOTS@@", _mots_json(title))
+                          .replace("@@ACCENT@@", acc)),
+    }
+    for cle, valeur in remplace.items():
+        modele = modele.replace(cle, valeur)
+    return modele
 
-def _html_photo(cfg: Config, video_id: int, title: str, photo_uri: str) -> str:
-    """Cover PRO SANS DÉTOURAGE (retour Michel 15/07 : « plus de détouré, c'est pas
-    pro »). Photo du pasteur en demi-cadre PLEIN (object-cover), FONDUE en dégradé
-    vers un fond coloré côté texte — comme un poster. Texte géant par-dessus."""
-    acc, rgb = COVER_ACCENTS[video_id % len(COVER_ACCENTS)]
-    title_html = _impact_lines(title, acc)
-    short = _short_words(title)
-    fs = 132 if len(short) <= 4 else (112 if len(short) <= 6 else 94)
-    longest = max((len(w) for w in short), default=8)
-    fs = min(fs, int(W * 0.52 / (longest * 0.60)))
-    stroke = max(int(fs * 0.03), 3)
-    logo_uri = ""
-    lf = ASSETS_DIR / "logo-chaine.png"
-    if lf.exists():
-        logo_uri = _b64(lf.read_bytes())
-    left = video_id % 2 == 1                       # pasteur à gauche ou à droite
-    pside = "left" if left else "right"
-    oside = "right" if left else "left"
-    tside = "right:3%;left:50%" if left else "left:3%;right:50%"
-    grad = "90deg" if left else "270deg"
-    corner = "100%" if left else "0%"
-    return f"""<!doctype html><html><head><meta charset="utf-8"><style>
-  * {{ margin:0; padding:0; box-sizing:border-box; }}
-  body {{ width:{W}px; height:{H}px; overflow:hidden; position:relative;
-         font-family:'Anton','Archivo Black','DejaVu Sans',sans-serif;
-         background:radial-gradient(130% 100% at {corner} 50%, rgba({rgb},.22), #0b0712 62%); }}
-  .photo {{ position:absolute; top:0; {pside}:0; width:60%; height:100%;
-           background:url('{photo_uri}') center top/cover;
-           filter:saturate(1.22) contrast(1.08) brightness(1.05); }}
-  .blend {{ position:absolute; top:0; {pside}:0; width:62%; height:100%;
-           background:linear-gradient({grad}, transparent 52%, #0b0712 95%); }}
-  .vig {{ position:absolute; inset:0;
-         background:radial-gradient(ellipse at center, transparent 56%, rgba(0,0,0,.5) 100%); }}
-  .txt {{ position:absolute; top:50%; transform:translateY(-50%); {tside}; text-align:center; z-index:3; }}
-  h1 {{ font-size:{fs}px; line-height:1.08; letter-spacing:1px; color:#fff;
-       -webkit-text-stroke:{stroke}px rgba(0,0,0,.9);
-       text-shadow:0 4px 0 rgba(0,0,0,.5),0 12px 28px rgba(0,0,0,.75),0 0 42px rgba({rgb},.45); }}
-  .trait {{ width:60%; height:12px; margin:22px auto 0; border-radius:8px; transform:skewX(-16deg);
-           background:linear-gradient(90deg,transparent,{acc},#fff,{acc},transparent);
-           box-shadow:0 0 26px rgba({rgb},.7); }}
-  .logo {{ position:absolute; top:22px; {oside}:26px; width:92px; height:92px; border-radius:50%;
-          border:4px solid #fff; box-shadow:0 8px 20px rgba(0,0,0,.5); z-index:4; }}
-  .badge {{ position:absolute; bottom:24px; {oside}:30px; background:{acc}; color:#0a0a12; font-weight:bold;
-           font-size:28px; padding:8px 22px; border-radius:32px; border:3px solid #fff; z-index:4;
-           box-shadow:0 10px 22px rgba(0,0,0,.5),0 0 20px rgba({rgb},.5); }}
-</style></head><body>
-  <div class="photo"></div><div class="blend"></div><div class="vig"></div>
-  <div class="txt"><h1>{title_html}</h1><div class="trait"></div></div>
-  {f'<img class="logo" src="{logo_uri}">' if logo_uri else ''}
-</body></html>"""
+
+def _echappe(texte: str) -> str:
+    return html_mod.escape(texte)
 
 
 def _portrait_raw(row, video_id: int) -> bytes | None:
@@ -367,7 +431,8 @@ def _portrait_raw(row, video_id: int) -> bytes | None:
     folder = ASSETS_DIR / "portraits" / _slug(speaker)
     if not folder.is_dir():
         return None
-    photos = sorted(p for p in folder.iterdir() if p.suffix.lower() in (".jpg", ".jpeg", ".png"))
+    photos = sorted(p for p in folder.iterdir() if p.suffix.lower() in (".jpg", ".jpeg", ".png")
+                    and not p.name.endswith(".cut.png"))
     if not photos:
         return None
     # Les portraits collectés automatiquement depuis les streams 1080p passent
@@ -393,97 +458,35 @@ def _portrait_raw(row, video_id: int) -> bytes | None:
     return photos[video_id % len(photos)].read_bytes()
 
 
-def _html_old(cfg: Config, video_id: int, title: str, subject_uri: str, is_card: bool) -> str:
-    bg, accent, glow = THEMES[video_id % len(THEMES)]
-    line1, line2 = _split_title(title)
-    line1, line2 = html_mod.escape(line1), html_mod.escape(line2)
-    layout_b = video_id % 2 == 1  # photo à gauche / texte à droite, ou l'inverse
+def _portrait_video(row, vertical: bool) -> bytes | None:
+    """Repli : le visage pris dans l'extrait lui-même.
 
-    # Style « référence Amessan » : fond sombre ambiance, titre centré plein
-    # cadre en mots alternés blanc/or, petite photo du pasteur en bas à gauche.
-    if video_id % 3 != 2 or not subject_uri:
-        title_html = _alt_words(title, "#f2b632")
-        subject_img = (f'<img style="position:absolute;left:24px;bottom:0;height:46%;'
-                       f'filter:drop-shadow(0 0 24px rgba(0,0,0,.8));" src="{subject_uri}">'
-                       if subject_uri else "")
-        return f"""<!doctype html><html><head><meta charset="utf-8"><style>
-  * {{ margin:0; padding:0; box-sizing:border-box; }}
-  body {{ width:{W}px; height:{H}px; overflow:hidden; position:relative;
-         font-family:'Anton','Archivo Black','DejaVu Sans',sans-serif;
-         background:
-           radial-gradient(ellipse at 70% 30%, rgba(242,182,50,.16) 0%, transparent 55%),
-           linear-gradient(140deg,#0d0a06 0%,#221607 55%,#3a2408 100%); }}
-  .vig {{ position:absolute; inset:0;
-         background:radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.55) 100%); }}
-  h1 {{ position:absolute; left:6%; right:6%; top:50%; transform:translateY(-52%);
-       text-align:center; font-size:104px; line-height:1.18; letter-spacing:2px;
-       text-shadow:0 5px 0 rgba(0,0,0,.55),0 16px 34px rgba(0,0,0,.6); }}
-  .badge {{ position:absolute; bottom:30px; right:36px;
-           background:linear-gradient(180deg,#ffe27a,#f7b733); color:#1c1206;
-           font-size:30px; padding:10px 26px; border-radius:36px;
-           border:3px solid #fff; box-shadow:0 10px 24px rgba(0,0,0,.5); }}
-</style></head><body>
-  <div class="vig"></div>
-  {subject_img}
-  <h1>{title_html}</h1>
-  <div class="badge">{html_mod.escape(cfg.channel_name.upper())}</div>
-</body></html>"""
-    logo_uri = ""
-    logo_file = ASSETS_DIR / "logo-chaine.png"
-    if logo_file.exists():
-        logo_uri = _b64(logo_file.read_bytes())
+    Sans ce repli, une vidéo dont l'orateur n'est pas identifié recevait une
+    cover TOUT-TEXTE. Michel les a fait retirer le 10/08/2026 : elles ne
+    rapportent rien. Le résultat est mis en cache — la recherche parcourt la
+    vidéo entière, on ne la refait pas à chaque régénération.
+    """
+    chemin = None
+    for colonne in ("render_path", "path"):
+        if colonne in row.keys() and row[colonne]:
+            candidat = Path(row[colonne])
+            if candidat.is_file():
+                chemin = candidat
+                break
+    if chemin is None:
+        return None
 
-    subject_css = (
-        "height:96%;bottom:0;filter:drop-shadow(0 0 34px {glow}cc) drop-shadow(0 14px 22px rgba(0,0,0,.55));"
-        if not is_card else
-        "height:88%;bottom:4%;border-radius:22px;border:5px solid #fff;"
-        "box-shadow:0 0 40px {glow}aa,0 18px 34px rgba(0,0,0,.6);object-fit:cover;width:37%;"
-    ).format(glow=glow)
-    side_subject = "left:2.5%" if layout_b else "right:2.5%"
-    if subject_uri:
-        side_text = ("left:44%;right:4%;text-align:left" if layout_b
-                     else "left:5%;right:44%;text-align:left")
-    else:
-        # Cover typographique (orateur non identifié) : titre pleine largeur centré
-        side_text = "left:8%;right:8%;text-align:center"
+    cache = ASSETS_DIR / "portraits" / "extraits"
+    cache.mkdir(parents=True, exist_ok=True)
+    fichier = cache / f"{row['name']}{'-v' if vertical else '-h'}.jpg"
+    if fichier.is_file():
+        return fichier.read_bytes()
 
-    return f"""<!doctype html><html><head><meta charset="utf-8"><style>
-  * {{ margin:0; padding:0; box-sizing:border-box; }}
-  body {{ width:{W}px; height:{H}px; overflow:hidden; position:relative;
-         background:{bg}; font-family:'Anton','Archivo Black','DejaVu Sans',sans-serif; }}
-  .halo {{ position:absolute; width:900px; height:900px; border-radius:50%;
-          background:radial-gradient(circle,{glow}55 0%,transparent 62%);
-          {'left:-180px' if layout_b else 'right:-180px'}; top:-160px; }}
-  .grain {{ position:absolute; inset:0;
-    background-image:radial-gradient(rgba(255,255,255,.05) 1px,transparent 1px);
-    background-size:26px 26px; }}
-  .bar {{ position:absolute; top:0; {'right:0' if layout_b else 'left:0'};
-         width:14px; height:100%; background:{accent}; opacity:.9; }}
-  .subject {{ position:absolute; {side_subject}; {subject_css} }}
-  .txt {{ position:absolute; top:50%; transform:translateY(-50%); {side_text}; }}
-  .kicker {{ display:inline-block; background:{accent}; color:#141414;
-            font-size:30px; letter-spacing:2px; padding:8px 22px; border-radius:8px;
-            margin-bottom:22px; box-shadow:0 8px 18px rgba(0,0,0,.4); }}
-  h1 {{ color:#fff; font-size:96px; line-height:1.04; letter-spacing:1px;
-       text-shadow:0 6px 0 rgba(0,0,0,.45),0 14px 30px rgba(0,0,0,.5); }}
-  h1 .a {{ color:{accent}; }}
-  .badge {{ position:absolute; bottom:34px; {'right:36px' if layout_b else 'left:40px'};
-           background:linear-gradient(180deg,#ffe27a,#f7b733); color:#1c1206;
-           font-size:34px; padding:12px 30px; border-radius:40px;
-           border:4px solid #fff; box-shadow:0 10px 24px rgba(0,0,0,.5); }}
-  .logo {{ position:absolute; top:26px; {'left:30px' if layout_b else 'right:30px'};
-          width:104px; height:104px; border-radius:50%; border:4px solid #fff;
-          box-shadow:0 8px 20px rgba(0,0,0,.5); }}
-</style></head><body>
-  <div class="halo"></div><div class="grain"></div><div class="bar"></div>
-  {f'<img class="subject" src="{subject_uri}">' if subject_uri else ''}
-  <div class="txt">
-    <div class="kicker">MESSAGE PUISSANT</div>
-    <h1><span class="a">{line1}</span><br>{line2}</h1>
-  </div>
-  <div class="badge">{html_mod.escape(cfg.channel_name.upper())}</div>
-  {f'<img class="logo" src="{logo_uri}">' if logo_uri else ''}
-</body></html>"""
+    from .visage import portrait_depuis_video
+    donnees = portrait_depuis_video(chemin, vertical=vertical)
+    if donnees:
+        fichier.write_bytes(donnees)
+    return donnees
 
 
 def _render_html(html: str, out_jpg: Path, vp_w: int = W, vp_h: int = H) -> bool:
@@ -503,7 +506,16 @@ def _render_html(html: str, out_jpg: Path, vp_w: int = W, vp_h: int = H) -> bool
             )
             page = context.new_page()
             page.set_content(html)
-            page.wait_for_timeout(400)  # chargement des polices
+            # Le calage du texte est fait par la page elle-même, APRÈS le
+            # chargement de la police embarquée : photographier avant, c'est
+            # capturer un texte encore mal dimensionné.
+            try:
+                page.wait_for_function("window.__calage !== undefined", timeout=20000)
+                calage = page.evaluate("window.__calage")
+                log.debug("Calage : %s", calage)
+            except Exception as exc:
+                log.warning("Calage du texte non confirmé (%s) — capture quand même", exc)
+                page.wait_for_timeout(600)
             page.screenshot(path=str(master), type="jpeg", quality=95)
             context.close()
             browser.close()
@@ -528,29 +540,20 @@ def _slug(name: str) -> str:
     return "-".join(s.split())
 
 
-def _portrait_for(row, video_id: int) -> bytes | None:
-    """Photo de la bibliothèque, UNIQUEMENT si l'orateur est identifié
-    (règle de Michel : plus de détourage de nos vidéos — photos en ligne).
-    Le détourage des portraits est mis en cache."""
-    speaker = row["speaker"] if "speaker" in row.keys() and row["speaker"] else None
-    if not speaker:
-        return None
-    folder = ASSETS_DIR / "portraits" / _slug(speaker)
-    if not folder.is_dir():
-        return None
-    photos = sorted(p for p in folder.iterdir() if p.suffix.lower() in (".jpg", ".jpeg", ".png"))
-    if not photos:
-        return None
-    photo = photos[video_id % len(photos)]
-    cache = photo.with_suffix(photo.suffix + ".cut.png")
-    if cache.exists():
-        return cache.read_bytes()
-    cut = _cutout_png(photo.read_bytes())
-    try:
-        cache.write_bytes(cut)
-    except OSError:
-        pass
-    return cut
+def est_short(row) -> bool:
+    """Vrai Short (vidéo verticale) — et non « vidéo courte ».
+
+    La durée seule ne suffit pas : le découpeur (supprimé depuis) produisait
+    pour chaque extrait un jumeau HORIZONTAL de la même durée. Se fier à
+    `duration_s <= 180` collait donc une couverture 9:16 à des vidéos 16:9
+    (« cette vidéo n'est pas un short », Michel 30/07). La catégorie reste le
+    bon critère pour tout le reste du catalogue.
+    """
+    categorie = (row["category"] or "") if "category" in row.keys() else ""
+    if categorie:
+        return categorie == "short"
+    nom = (row["name"] or "") if "name" in row.keys() else ""
+    return nom.endswith("_short")
 
 
 def generate_thumb(cfg: Config, db: Database, video_id: int) -> bool:
@@ -579,20 +582,25 @@ def generate_thumb(cfg: Config, db: Database, video_id: int) -> bool:
         return False
 
     theme = (row["thumb_theme"] or "") if "thumb_theme" in row.keys() else ""
-    # Cover PRO sans détourage : photo BRUTE du pasteur en poster (retour Michel
-    # 15/07 : « plus de détouré, pas pro »). Repli carte texte si orateur inconnu.
-    photo = _portrait_raw(row, video_id)
-    if photo:
-        html = _html_photo(cfg, video_id, thumb_title, _b64(photo))
-    else:
-        html = _html(cfg, video_id, thumb_title, "", is_card=False, theme=theme)
 
-    # Shorts : occasionnellement une miniature VERTICALE (9:16) pour le flux Shorts.
-    # Environ 1/4 des Shorts, varié par video_id. Les vidéos longues restent en 16:9.
-    dur = row["duration_s"] or 0
-    is_short = dur <= 180
-    vertical = is_short and (video_id % 4 == 0)
+    # Format : 9:16 pour les vrais Shorts (verticaux), 16:9 pour le reste.
+    vertical = est_short(row)
     vp_w, vp_h = (H, W) if vertical else (W, H)
+
+    # Cover PRO sans détourage : photo BRUTE du pasteur en poster (retour Michel
+    # 15/07 : « plus de détouré, pas pro »).
+    photo = _portrait_raw(row, video_id)
+    if not photo:
+        # Orateur non identifié : on va chercher son visage DANS l'extrait.
+        # Le décor abstrait ne sert plus que de dernier recours — une cover
+        # tout-texte est ce que Michel a fait retirer de la chaîne le 10/08.
+        photo = _portrait_video(row, vertical)
+    if not photo:
+        log.warning("Aucun visage disponible pour %s — cover de repli sur décor",
+                    row["name"])
+
+    html = _html(cfg, video_id, thumb_title, vp_w, vp_h,
+                 theme=theme, photo_uri=_b64(photo) if photo else "")
 
     if not _render_html(html, out, vp_w=vp_w, vp_h=vp_h):
         return False
