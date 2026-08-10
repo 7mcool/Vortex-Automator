@@ -10,8 +10,20 @@ token_file = '/app/secrets/youtube_token.json'
 [publish]
 facebook_publish = true
 instagram_publish = true
-hours = [3, 7, 11, 14, 17, 20]      # 6 créneaux par jour
-daily_limit = 6
+# CADENCE RÉDUITE le 31/07/2026, sur décision de Michel et sur les chiffres :
+# à 5 publications/jour ou moins, une vidéo faisait 160 vues médianes entre 3
+# et 8 jours ; à 6-8/jour, 53. Publier plus rapportait moins, même en total
+# (5 × 160 = 800 contre 8 × 53 = 424). Michel a tranché : 4 par jour.
+#
+# Les HEURES viennent elles aussi de la mesure (vues médianes des vidéos de 3
+# jours et plus, heure locale) : midi +64 %, 18h +28 %, 15h au niveau de la
+# médiane, 9h −23 %, minuit −40 %, 21h −46 %. On garde donc la fenêtre
+# éveillée et on évite la nuit et la fin de soirée.
+#
+# Pour changer la cadence : ajuster ces deux lignes ensemble (autant d'heures
+# que la limite), puis relancer `vps/replanifier.py` pour réétaler l'existant.
+hours = [7, 12, 16, 19]             # 4 créneaux par jour
+daily_limit = 4
 timezone = "Africa/Porto-Novo"
 category_id = "27"
 language = "fr"
@@ -19,6 +31,12 @@ made_for_kids = false
 notify_subscribers = true
 playlist_id = ""
 upload_captions = false
+
+[tiktok]
+# TikTok est maintenant la priorité de distribution : 7 extraits/jour via
+# Submagic, séparés des 4 uploads YouTube qui restent contraints par le quota.
+hours = [7, 10, 12, 14, 16, 19, 21]
+daily_limit = 7
 
 [whisper]
 model = "small"
@@ -35,3 +53,92 @@ tags_count = 15
 [video]
 shorts_max_seconds = 180
 min_duration_seconds = 5
+
+# ---------------------------------------------------------------------------
+# DÉCOUPAGE DES LONGUES VIDÉOS YOUTUBE (Submagic)
+[clipping]
+source_duree_min_s = 1800
+clip_min_s = 120
+clip_max_s = 300
+gabarit = "Sara"
+suivi_visage = true
+projets_par_jour = 2
+clips_retenus_par_source = 5
+note_minimale = 55
+langue = "fr"
+
+[[clipping.chaines]]
+handle = "JACAMESSANLIVE"
+id = "UC-H5EQ30NTRRbCz-lG-VLXA"
+nom = "Jacques Amessan Live"
+pasteur = "Jacques Amessan"
+eglise = "Maison de Sagesse et d'Adoration"
+pasteur_unique = true
+
+[[clipping.chaines]]
+handle = "lamaisondesagesse"
+id = "UC3G07RIgHcb0_Ae2h0WbuhA"
+nom = "Maison de Sagesse et d'Adoration"
+pasteur = "Jacques Amessan"
+eglise = "Maison de Sagesse et d'Adoration"
+pasteur_unique = true
+
+[[clipping.chaines]]
+handle = "Pasteurydjatti"
+id = "UCoLkpZR58Tq_4gxKHjQTllQ"
+nom = "Pasteur Yannick Djatti"
+pasteur = "Yannick Djatti"
+eglise = "Centre Chrétien de Réveil"
+pasteur_unique = true
+
+[[clipping.chaines]]
+handle = "ccrportedesnations"
+id = "UCVE0jrob3PyiUmklqWS7vwg"
+nom = "Centre Chrétien de Réveil — Porte des Nations"
+pasteur = "Yannick Djatti"
+eglise = "Centre Chrétien de Réveil"
+pasteur_unique = false
+
+[[clipping.chaines]]
+handle = "EgliseVasesdHonneur"
+id = "UCOBrKVhgjiUcSoGyqeo29WA"
+nom = "Église Vases d'Honneur"
+pasteur = "Mohammed Sanogo"
+eglise = "Église Vases d'Honneur"
+pasteur_unique = false
+
+[[clipping.chaines]]
+handle = "EgliseGenerationDaniel"
+id = "UCyBCPqzyCO-xyA9AFk32UaA"
+nom = "Église Génération Daniel"
+pasteur = "Aimé Bodjiyé"
+eglise = "Église Génération Daniel"
+pasteur_unique = true
+
+# ---------------------------------------------------------------------------
+# OPUSCLIP — extraits longs
+[opusclip]
+credits_par_mois = 300
+fenetre_max_s = 2700
+fenetre_min_s = 900
+credits_max_par_projet = 50
+clip_min_s = 420
+clip_max_s = 900
+clip_plancher_s = 60
+modele = "ClipBasic"
+genre = "Auto"
+traiter_a_partir_de = "2026-08-07"
+fraicheur_max_jours = 12
+sermons_par_jour = 1
+chaines_reservees = ["JACAMESSANLIVE", "lamaisondesagesse"]
+jour_ouverture_autres = 32
+
+# ---------------------------------------------------------------------------
+# LIVRAISON PAR COURRIEL
+[courriel]
+destinataires = ["hedjav@gmail.com", "7ememichelcool@gmail.com"]
+expediteur = ""
+serveur = "smtp.gmail.com"
+port = 587
+pieces_jointes = false
+taille_max_mo = 20

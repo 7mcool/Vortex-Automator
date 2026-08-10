@@ -38,3 +38,9 @@
 
 # Healthcheck + alerte Telegram — toutes les 6 heures
 0 */6 * * * /opt/vortex/repo/vps/healthcheck.sh
+
+# --- SERMONS LONGS (OpusClip) ---
+# Toutes les 30 minutes : veille → confirmation Telegram → validation GO/NON
+# → récolte → publication TikTok. Le token Telegram est passé au conteneur
+# via -e pour que vortex/telegram.py puisse envoyer et lire les messages.
+*/30 * * * * set -a; . /opt/mt5-monitor/monitor.env; set +a; flock -n /tmp/vortex-sermons.lock -c "cd /opt/vortex/repo && docker compose -f docker-compose.vps.yml run --rm -e TELEGRAM_TOKEN -e TELEGRAM_CHAT vortex sh vps/sermons.sh" >> /opt/vortex/repo/data/logs/sermons.log 2>&1

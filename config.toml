@@ -6,15 +6,12 @@ tokkit_db = 'E:\hedjav\4K Tokkit\data.sqlite'
 data_dir = 'data'                                   # relatif à la racine du dépôt
 client_secret_file = 'secrets\client_secret.json'
 token_file = 'secrets\youtube_token.json'
-# Dossiers du découpeur. Sur le VPS ils valent /app/videos/... ; ici ils sont
 # relatifs au dépôt, sinon Python les résoudrait en C:\app\videos\... — un
 # chemin avec racine mais sans lettre de lecteur n'est pas absolu sous Windows.
-sources_dir = 'videos\sources'
-tiktok_queue_dir = 'videos\tiktok_queue'
 
 [publish]
-hours = [9, 12, 15, 18, 21]      # 5 créneaux par jour
-daily_limit = 5
+hours = [7, 12, 16, 19]          # 4 créneaux par jour (mesure du 31/07)
+daily_limit = 4
 timezone = "Africa/Porto-Novo"   # Cotonou, Bénin (UTC+1, sans heure d'été)
 category_id = "27"               # Éducation
 language = "fr"
@@ -22,9 +19,23 @@ made_for_kids = false
 notify_subscribers = true
 playlist_id = ""
 # Sous-titres via l'API : coûte 400 unités de quota/vidéo. Désactivé pour tenir
-# 5 uploads/jour dans le quota gratuit (10 000/j) — YouTube auto-génère les
+# 4 uploads/jour dans le quota gratuit (10 000/j) — YouTube auto-génère les
 # sous-titres de toute façon ; les fichiers .srt restent dans data/subtitles.
 upload_captions = false
+
+[tiktok]
+# Grille PROPRE À TIKTOK, indépendante de celle de YouTube.
+#
+# Décision de Michel (07/08) : les extraits d'un même sermon sortent TOUS le
+# même jour, et la nuit après minuit est autorisée. Un culte qui se termine à
+# 23 h voit donc ses extraits partir à 0 h, 2 h, 4 h et 7 h, sans attendre le
+# matin. Le planificateur prend simplement les prochains créneaux libres.
+#
+# ⚠️ Pour mémoire, mesuré sur YouTube le 31/07 : minuit −40 % de vues, 21 h
+# −46 %, midi +64 %. Michel a choisi la réactivité plutôt que ces créneaux —
+# c'est un arbitrage assumé, et TikTok ne se comporte pas comme YouTube.
+hours = [0, 2, 4, 7, 10, 12, 14, 16, 19, 21]
+daily_limit = 10
 
 [whisper]
 model = "small"        # small = bon compromis vitesse/qualité sur CPU
@@ -43,3 +54,181 @@ tags_count = 15
 [video]
 shorts_max_seconds = 180   # Shorts YouTube : jusqu'à 3 minutes
 min_duration_seconds = 5
+
+# ---------------------------------------------------------------------------
+# DÉCOUPAGE DES LONGUES VIDÉOS YOUTUBE (Submagic)
+#
+# On vise les DIRECTS et les vidéos très longues des chaînes ci-dessous : c'est
+# là qu'est la matière. Submagic télécharge la vidéo lui-même depuis YouTube,
+# la découpe, recadre sur le visage et incruste les sous-titres.
+#
+# Coût : 1 crédit Magic Clips par vidéo envoyée, quelle que soit sa durée —
+# donc toujours privilégier un direct de 3 h à une vidéo de 20 min.
+[clipping]
+source_duree_min_s = 1800   # 30 min : en dessous, ce n'est pas un sermon complet
+# RÉPARTITION DES DEUX MOTEURS (Michel, 09/08, après avoir jugé les rendus) :
+#   Submagic  →  2 à 5 minutes    (ce bloc)
+#   OpusClip  →  5 minutes et plus (voir [opusclip])
+# Les deux gammes se touchent sans se recouvrir : un même passage n'est jamais
+# produit deux fois, et chaque outil travaille là où il est bon.
+#
+# La règle éditoriale de fond ne change pas : un extrait doit porter
+# l'affirmation choc ET son explication complète. C'est pourquoi le gros du
+# volume passe désormais par OpusClip, qui seul dépasse 5 minutes.
+clip_min_s = 120            # 2 min
+# 300 s = 5 minutes, PLAFOND DUR de l'API Submagic : au-delà elle répond
+# « maxClipLength must be between 15 and 300 » (vérifié le 03/08). C'est
+# exactement pourquoi OpusClip prend le relais au-dessus.
+clip_max_s = 300
+gabarit = "Sara"            # style de sous-titres (`vortex gabarits` les liste)
+suivi_visage = true
+projets_par_jour = 2        # garde-fou : 2 crédits/jour maximum
+clips_retenus_par_source = 5
+note_minimale = 55          # note de viralité Submagic en dessous de laquelle on jette
+langue = "fr"
+
+# Pour ajouter une chaîne : copier un bloc, mettre le @handle, puis lancer
+# `python -m vortex veille --resoudre` qui affiche l'identifiant UC… à coller.
+# pasteur_unique = true  -> la chaîne ne diffuse QUE ce prédicateur, on peut le
+#                           nommer sans risque.
+# pasteur_unique = false -> chaîne d'église avec des invités : le nom n'est
+#                           retenu que s'il est écrit dans le titre.
+[[clipping.chaines]]
+handle = "JACAMESSANLIVE"
+id = "UC-H5EQ30NTRRbCz-lG-VLXA"
+nom = "Jacques Amessan Live"
+pasteur = "Jacques Amessan"
+eglise = "Maison de Sagesse et d'Adoration"
+pasteur_unique = true
+
+[[clipping.chaines]]
+handle = "lamaisondesagesse"
+id = "UC3G07RIgHcb0_Ae2h0WbuhA"
+nom = "Maison de Sagesse et d'Adoration"
+pasteur = "Jacques Amessan"
+eglise = "Maison de Sagesse et d'Adoration"
+pasteur_unique = true
+
+[[clipping.chaines]]
+handle = "Pasteurydjatti"
+id = "UCoLkpZR58Tq_4gxKHjQTllQ"
+nom = "Pasteur Yannick Djatti"
+pasteur = "Yannick Djatti"
+eglise = "Centre Chrétien de Réveil"
+pasteur_unique = true
+
+[[clipping.chaines]]
+handle = "ccrportedesnations"
+id = "UCVE0jrob3PyiUmklqWS7vwg"
+nom = "Centre Chrétien de Réveil — Porte des Nations"
+pasteur = "Yannick Djatti"
+eglise = "Centre Chrétien de Réveil"
+pasteur_unique = false      # rediffuse les cultes, parfois d'autres orateurs
+
+[[clipping.chaines]]
+handle = "EgliseVasesdHonneur"
+id = "UCOBrKVhgjiUcSoGyqeo29WA"
+nom = "Église Vases d'Honneur"
+pasteur = "Mohammed Sanogo"
+eglise = "Église Vases d'Honneur"
+pasteur_unique = false      # reçoit Gerald Kouamé, Lilliane Sanogo…
+
+[[clipping.chaines]]
+handle = "EgliseGenerationDaniel"
+id = "UCyBCPqzyCO-xyA9AFk32UaA"
+nom = "Église Génération Daniel"
+pasteur = "Aimé Bodjiyé"
+eglise = "Église Génération Daniel"
+pasteur_unique = true
+
+# @cfreresc RETIRÉE le 06/08/2026 : relevé sur ses 15 dernières publications,
+# elle n'a produit AUCUN sermon de 30 min ou plus — que des formats courts.
+# La surveiller ne rapportait rien.
+
+# ---------------------------------------------------------------------------
+# OPUSCLIP — extraits plus longs que ce que Submagic sait faire
+#
+# ⚠️ FACTURATION : 1 crédit = 1 MINUTE DE VIDÉO IMPORTÉE, pas par extrait.
+# Un direct de 3 h 25 envoyé en entier coûte 205 crédits. Avec 300 crédits par
+# mois, cela ferait UN sermon et demi.
+#
+# D'où la règle posée par Michel le 05/08 : on ne vise QUE la prédication.
+# `vortex/fenetre.py` la repère en lisant les sous-titres YouTube (gratuit),
+# et le plafond ci-dessous garantit qu'aucune erreur ne produit une facture
+# surprise. À 60 minutes par sermon : 5 sermons par mois.
+[opusclip]
+credits_par_mois = 300           # ce que Michel a réellement — sert au décompte
+# 45 min = 45 crédits, donc 6 sermons par mois avec de la marge (Michel, 06/08 :
+# « on doit faire au moins plus que 5 sermons par mois »). Et 45 minutes
+# contiennent 3 extraits de 15 min ou 6 de 7 min — largement le minimum de 2.
+fenetre_max_s = 2700
+fenetre_min_s = 900              # en dessous de 15 min, la fenêtre est suspecte
+credits_max_par_projet = 50      # refus net au-delà, quoi que dise l'IA
+# Règle éditoriale de Michel : l'affirmation choc ET son explication entière.
+# Il a tranché le 06/08 : « minimum 7 min jusqu'à 15 min ».
+clip_min_s = 420                 # 7 min — ce qu'on DEMANDE
+clip_max_s = 900                 # 15 min
+# ⚠️ OpusClip ne respecte PAS la durée minimale demandée. Mesuré le 09/08 sur
+# le premier projet réel : pour 7-15 min demandées, il a rendu 9 min 30,
+# 5 min 36 et… 18 secondes. Le maximum est tenu, le minimum non.
+#
+# CE PLANCHER N'EST PAS LE CRITÈRE — c'est une VÉRIFICATION. Michel, 09/08 :
+# « on privilégie la complétude de la vidéo, la durée sert à vérifier ; une
+# vidéo complète expliquant un hook ne peut pas faire moins d'une minute ».
+#
+# Autrement dit : ce n'est pas la brièveté qui disqualifie un extrait, c'est
+# le fait qu'il ne se tienne pas. Mais une durée sous la minute PROUVE qu'il
+# ne se tient pas — on n'énonce pas une affirmation et son explication en
+# quarante secondes. Le seuil sert donc de contrôle de cohérence.
+#
+# Ce qui a écarté le morceau de 18 secondes du premier projet, c'est d'abord
+# le contrôle de recouvrement : il était recopié de la fin d'un autre extrait.
+clip_plancher_s = 60
+modele = "ClipBasic"             # ClipBasic = orateur face caméra ; ClipAnything sinon
+genre = "Auto"
+# ON NE VISE QUE LE NEUF (Michel, 06/08 : « la conférence Sophos est déjà
+# passée, on vise les nouveaux »). Deux verrous, qui doivent tous deux passer.
+#
+# 1. LA BASCULE. Rien de publié AVANT cette date ne part au découpage. C'est
+#    ce qui met de côté les 15 conférences Sophos : elles datent de 8 jours,
+#    donc « fraîches » au sens du délai, mais l'événement est passé.
+#    Pour rouvrir la réserve un jour : reculer cette date.
+traiter_a_partir_de = "2026-08-07"
+# 2. LE DÉLAI. Même après la bascule, un sermon qui a dormi plus longtemps que
+#    ceci ne part plus : le budget est trop serré pour rattraper le retard.
+fraicheur_max_jours = 12
+# ⚠️ PLAFOND QUOTIDIEN — la leçon du 10/08.
+# Le cycle automatique a dépensé 90 crédits en vingt minutes (deux sermons
+# d'affilée) parce que rien ne bridait la CADENCE : seul le total mensuel
+# était surveillé. Un sermon par jour au maximum, quoi qu'il arrive.
+sermons_par_jour = 1
+
+# STRATÉGIE (Michel, 10/08) : « on vise ceux du pasteur Jacques Amessan tout
+# au long du mois, et à la fin, quand il en reste, on choisit aléatoirement
+# entre les autres chaînes. »
+#
+# Le budget est donc RÉSERVÉ à Amessan. Ses deux chaînes produisent 11 à 15
+# sermons longs par mois pour un budget de 6 : il y a toujours de quoi faire,
+# et c'est lui qui rapporte le plus (23 800 vues médianes par sermon, contre
+# 12 000 pour Vases d'Honneur, 7 600 pour Djatti, 1 060 pour le CCR).
+chaines_reservees = ["JACAMESSANLIVE", "lamaisondesagesse"]
+# Jour du mois à partir duquel les autres chaînes deviennent éligibles, s'il
+# reste des crédits. Avant cette date, le budget n'est dépensé que pour
+# Amessan — même si aucun de ses sermons n'est disponible ce jour-là.
+jour_ouverture_autres = 32
+
+# ---------------------------------------------------------------------------
+# LIVRAISON PAR COURRIEL
+# Tant que la publication automatique sur TikTok n'est pas possible (l'app
+# « Sophos Publisher » a été refusée le 31/07), les extraits partent par mail.
+[courriel]
+destinataires = ["hedjav@gmail.com", "7ememichelcool@gmail.com"]
+expediteur = ""             # laissé vide = identique à SMTP_USER
+serveur = "smtp.gmail.com"
+port = 587
+# Mesuré le 03/08 : Submagic rend des extraits de 90 s à 110-120 Mo. Aucun ne
+# tiendra jamais dans un courriel (Gmail plafonne à 25 Mo), et les télécharger
+# pour rien coûterait 500 Mo de trafic par envoi sur le serveur. On envoie donc
+# le LIEN de téléchargement, qui s'ouvre très bien depuis un téléphone.
+pieces_jointes = false
+taille_max_mo = 20          # si un jour on repasse à true
