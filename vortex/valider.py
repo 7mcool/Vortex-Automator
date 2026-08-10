@@ -50,8 +50,8 @@ def valider(cfg: Config, db: Database, *, live: bool = False) -> dict:
         return {"lances": 0, "ecartes": 0, "rappels": 0, "abandonnes": 0,
                 "en_attente": 0}
 
-    # Lire les réponses Telegram.
-    reponses = telegram.lire_reponses(depuis_minutes=30)
+    # Lire les réponses Telegram (fenêtre large : voir telegram.lire_reponses).
+    reponses = telegram.lire_reponses()
 
     # Indexer les réponses par message_id auquel elles répondent.
     par_message = {}
@@ -69,7 +69,7 @@ def valider(cfg: Config, db: Database, *, live: bool = False) -> dict:
     restants = cfg.opus_credits_par_mois - deja
 
     for src in en_attente:
-        telegram_msg = src.get("telegram_msg")
+        telegram_msg = src["telegram_msg"]
         youtube_id = src["youtube_id"]
 
         if not telegram_msg:
@@ -160,7 +160,7 @@ def valider(cfg: Config, db: Database, *, live: bool = False) -> dict:
             # Pas encore de réponse. Vérifier l'ancienneté.
             try:
                 updated = datetime.fromisoformat(
-                    (src.get("updated_at") or "").replace("Z", "+00:00")
+                    (src["updated_at"] or "").replace("Z", "+00:00")
                 )
                 age = (maintenant - updated).total_seconds()
             except (ValueError, TypeError):

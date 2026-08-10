@@ -192,8 +192,13 @@ genre = "Auto"
 # 1. LA BASCULE. Rien de publié AVANT cette date ne part au découpage. C'est
 #    ce qui met de côté les 15 conférences Sophos : elles datent de 8 jours,
 #    donc « fraîches » au sens du délai, mais l'événement est passé.
-#    Pour rouvrir la réserve un jour : reculer cette date.
-traiter_a_partir_de = "2026-08-07"
+#
+#    Reculée au 1er août le 10/08, après vérification : sur les deux chaînes
+#    d'Amessan, RIEN n'est publié entre le 1er et le 7 août sauf le sermon du
+#    3 août (« SAGESSE POUR IDENTIFIER ET POURSUIVRE SA DESTINÉE », 1 h 59).
+#    Toutes les conférences Sophos sont antérieures au 1er : elles restent
+#    écartées. La bascule laisse donc passer ce seul sermon, et rien d'autre.
+traiter_a_partir_de = "2026-08-01"
 # 2. LE DÉLAI. Même après la bascule, un sermon qui a dormi plus longtemps que
 #    ceci ne part plus : le budget est trop serré pour rattraper le retard.
 fraicheur_max_jours = 12

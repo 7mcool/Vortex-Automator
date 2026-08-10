@@ -127,7 +127,10 @@ clip_max_s = 900
 clip_plancher_s = 60
 modele = "ClipBasic"
 genre = "Auto"
-traiter_a_partir_de = "2026-08-07"
+# Reculée au 1er août le 10/08 : sur les deux chaînes d'Amessan, rien n'est
+# publié entre le 1er et le 7 sauf le sermon du 3 août. Les conférences
+# Sophos sont toutes antérieures au 1er et restent donc écartées.
+traiter_a_partir_de = "2026-08-01"
 fraicheur_max_jours = 12
 sermons_par_jour = 1
 chaines_reservees = ["JACAMESSANLIVE", "lamaisondesagesse"]

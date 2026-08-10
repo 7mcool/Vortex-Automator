@@ -94,13 +94,20 @@ def signaler_action(texte: str) -> bool:
 # Lecture des réponses
 # ---------------------------------------------------------------------------
 
-def lire_reponses(depuis_minutes: int = 30) -> list[dict]:
+def lire_reponses(depuis_minutes: int = 1440) -> list[dict]:
     """Interroge getUpdates et extrait les réponses aux messages Vortex.
 
     Ne retourne QUE les messages qui :
     1. Répondent à un message que NOUS avons envoyé (reply_to_message)
     2. Contiennent un mot-clé d'action (GO, OUI, OK, NON, STOP, …)
     3. Datent de moins de `depuis_minutes` minutes
+
+    ⚠️ La fenêtre est LARGE (24 h) à dessein. L'offset Telegram garantit déjà
+    qu'un message n'est lu qu'une fois ; la fenêtre ne sert qu'à ignorer un
+    vieux fond de salon. Une fenêtre serrée serait dangereuse : si un passage
+    du cron saute (verrou flock, conteneur occupé), la réponse de Michel a
+    déjà été consommée par l'offset et serait écartée pour ancienneté —
+    perdue définitivement, le sermon restant bloqué jusqu'à l'abandon.
 
     Retourne une liste de dicts :
         {update_id, message_id, reply_to_message_id, texte, date_ts, action}
