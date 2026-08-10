@@ -222,6 +222,18 @@ chaines_reservees = ["JACAMESSANLIVE", "lamaisondesagesse"]
 # Amessan — même si aucun de ses sermons n'est disponible ce jour-là.
 jour_ouverture_autres = 32
 
+# SILENCE VAUT ACCORD (Michel, 10/08) : « qu'il aille automatique s'il n'a pas
+# de réponse, du moment que ça concerne le pasteur Jacques Amessan et que mes
+# principes sont bien validés ».
+#
+# Passé ce délai sans réponse sur Telegram, le sermon part tout seul — mais
+# SEULEMENT si tous les principes sont vérifiés : chaîne réservée à Amessan,
+# prédication REPÉRÉE (et non supposée), plafond du jour respecté, budget du
+# mois disponible. Sinon la question reste posée et rien n'est engagé.
+#
+# La question devient donc un droit de veto : trois heures pour dire NON.
+delai_auto_h = 3
+
 # ---------------------------------------------------------------------------
 # LIVRAISON PAR COURRIEL
 # Tant que la publication automatique sur TikTok n'est pas possible (l'app

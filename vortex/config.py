@@ -37,13 +37,6 @@ class Config:
     data_dir: Path
     client_secret_file: Path
     token_file: Path
-    # Dossiers du découpeur. Ils étaient écrits en dur dans clipper.py sous la
-    # forme « /app/... » : sous Windows ce n'est PAS un chemin absolu, il se
-    # résout sur le lecteur courant (C:\app\...). Le découpage ne trouvait donc
-    # aucune source et écrivait les verticaux hors du dépôt, sans erreur.
-    sources_dir: Path
-    tiktok_queue_dir: Path
-
     # Publication
     publish_hours: list[int] = field(default_factory=lambda: [9, 12, 15, 18, 21])
     daily_limit: int = 5
@@ -66,6 +59,12 @@ class Config:
     # Base publique pour servir les clips à l'API Reels Instagram (dashboard :8787).
     media_base_url: str = "http://187.127.235.148:8787"
 
+    # Grille TikTok, indépendante de celle de YouTube. Michel, 07/08 : les
+    # extraits d'un même sermon sortent TOUS le même jour, nuit comprise —
+    # un culte qui finit à 23 h publie à 0 h, 2 h, 4 h puis 7 h.
+    tiktok_hours: list[int] = field(default_factory=lambda: [0, 2, 4, 7, 10, 12, 14, 16, 19, 21])
+    tiktok_daily_limit: int = 10
+
     # Transcription
     whisper_model: str = "small"
     whisper_device: str = "cpu"
@@ -81,6 +80,44 @@ class Config:
     # Vidéo
     shorts_max_seconds: int = 180
     min_duration_seconds: int = 5
+
+    # Découpage des longues vidéos YouTube (Submagic)
+    chaines_surveillees: list[dict] = field(default_factory=list)
+    source_duree_min_s: int = 1800
+    clip_min_s: int = 30
+    clip_max_s: int = 120
+    gabarit_submagic: str = "Sara"
+    suivi_visage: bool = True
+    projets_par_jour: int = 2
+    clips_retenus_par_source: int = 5
+    note_minimale: float = 55.0
+    langue_clipping: str = "fr"
+
+    # OpusClip (extraits longs) — voir vortex/opusclip.py et vortex/fenetre.py
+    opus_credits_par_mois: int = 300
+    opus_fenetre_max_s: int = 2700
+    opus_fenetre_min_s: int = 900
+    opus_credits_max_par_projet: int = 50
+    opus_clip_min_s: int = 420
+    opus_clip_max_s: int = 900
+    opus_clip_plancher_s: int = 300
+    opus_modele: str = "ClipBasic"
+    opus_genre: str = "Auto"
+    opus_fraicheur_max_jours: int = 12
+    opus_traiter_a_partir_de: str = ""
+    opus_sermons_par_jour: int = 1
+    opus_chaines_reservees: list[str] = field(default_factory=list)
+    opus_jour_ouverture_autres: int = 24
+    # Heures d'attente avant qu'une question sans réponse parte toute seule.
+    opus_delai_auto_h: int = 3
+
+    # Livraison par courriel
+    courriel_destinataires: list[str] = field(default_factory=list)
+    courriel_expediteur: str = ""
+    smtp_serveur: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    courriel_pieces_jointes: bool = True
+    courriel_taille_max_mo: int = 20
 
     @property
     def db_file(self) -> Path:
@@ -113,9 +150,13 @@ def load_config(config_file: Path | None = None) -> Config:
 
     paths = raw.get("paths", {})
     publish = raw.get("publish", {})
+    tiktok = raw.get("tiktok", {})
     whisper = raw.get("whisper", {})
     seo = raw.get("seo", {})
     video = raw.get("video", {})
+    clipping = raw.get("clipping", {})
+    opus = raw.get("opusclip", {})
+    courriel = raw.get("courriel", {})
 
     def _path(value: str) -> Path:
         p = Path(value)
@@ -133,8 +174,6 @@ def load_config(config_file: Path | None = None) -> Config:
         ),
         # Valeurs par défaut identiques à l'ancien code en dur : le VPS ne bouge
         # pas. Le PC les redéfinit en relatif dans son propre config.toml.
-        sources_dir=_path(paths.get("sources_dir", "/app/videos/sources")),
-        tiktok_queue_dir=_path(paths.get("tiktok_queue_dir", "/app/videos/tiktok_queue")),
         publish_hours=list(publish.get("hours", [9, 12, 15, 18, 21])),
         daily_limit=int(publish.get("daily_limit", 5)),
         timezone=publish.get("timezone", "Africa/Porto-Novo"),
@@ -148,6 +187,8 @@ def load_config(config_file: Path | None = None) -> Config:
         instagram_publish=bool(publish.get("instagram_publish", False)),
         fb_page_id=str(publish.get("fb_page_id", "1203021176235142")),
         media_base_url=str(publish.get("media_base_url", "http://187.127.235.148:8787")),
+        tiktok_hours=list(tiktok.get("hours", [0, 2, 4, 7, 10, 12, 14, 16, 19, 21])),
+        tiktok_daily_limit=int(tiktok.get("daily_limit", 10)),
         whisper_model=whisper.get("model", "small"),
         whisper_device=whisper.get("device", "cpu"),
         whisper_compute=whisper.get("compute_type", "int8"),
@@ -158,6 +199,44 @@ def load_config(config_file: Path | None = None) -> Config:
         tags_count=int(seo.get("tags_count", 15)),
         shorts_max_seconds=int(video.get("shorts_max_seconds", 180)),
         min_duration_seconds=int(video.get("min_duration_seconds", 5)),
+        # [[clipping.chaines]] est une liste de tables TOML : chaque entrée est
+        # déjà un dict {handle, id, nom, pasteur, eglise, pasteur_unique}.
+        chaines_surveillees=list(clipping.get("chaines", [])),
+        source_duree_min_s=int(clipping.get("source_duree_min_s", 1800)),
+        clip_min_s=int(clipping.get("clip_min_s", 30)),
+        clip_max_s=int(clipping.get("clip_max_s", 120)),
+        gabarit_submagic=str(clipping.get("gabarit", "Sara")),
+        suivi_visage=bool(clipping.get("suivi_visage", True)),
+        projets_par_jour=int(clipping.get("projets_par_jour", 2)),
+        clips_retenus_par_source=int(clipping.get("clips_retenus_par_source", 5)),
+        note_minimale=float(clipping.get("note_minimale", 55)),
+        langue_clipping=str(clipping.get("langue", "fr")),
+        opus_credits_par_mois=int(opus.get("credits_par_mois", 300)),
+        opus_fenetre_max_s=int(opus.get("fenetre_max_s", 2700)),
+        opus_fenetre_min_s=int(opus.get("fenetre_min_s", 900)),
+        opus_credits_max_par_projet=int(opus.get("credits_max_par_projet", 50)),
+        opus_clip_min_s=int(opus.get("clip_min_s", 420)),
+        opus_clip_max_s=int(opus.get("clip_max_s", 900)),
+        opus_clip_plancher_s=int(opus.get("clip_plancher_s", 300)),
+        opus_modele=str(opus.get("modele", "ClipBasic")),
+        opus_genre=str(opus.get("genre", "Auto")),
+        opus_fraicheur_max_jours=int(opus.get("fraicheur_max_jours", 12)),
+        opus_traiter_a_partir_de=str(opus.get("traiter_a_partir_de", "")),
+        opus_sermons_par_jour=int(opus.get("sermons_par_jour", 1)),
+        opus_chaines_reservees=list(opus.get("chaines_reservees", [])),
+        opus_jour_ouverture_autres=int(opus.get("jour_ouverture_autres", 24)),
+        opus_delai_auto_h=int(opus.get("delai_auto_h", 3)),
+        # Accepte une adresse seule ou une liste : Michel veut recevoir sur
+        # deux boîtes (celle de la chaîne et la sienne).
+        courriel_destinataires=(
+            [courriel["destinataire"]] if courriel.get("destinataire")
+            else [a for a in courriel.get("destinataires", []) if a]
+        ),
+        courriel_expediteur=str(courriel.get("expediteur", "")),
+        smtp_serveur=str(courriel.get("serveur", "smtp.gmail.com")),
+        smtp_port=int(courriel.get("port", 587)),
+        courriel_pieces_jointes=bool(courriel.get("pieces_jointes", True)),
+        courriel_taille_max_mo=int(courriel.get("taille_max_mo", 20)),
     )
     cfg.ensure_dirs()
     return cfg

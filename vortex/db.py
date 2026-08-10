@@ -151,6 +151,15 @@ class Database:
                 # Identifiant du message Telegram de confirmation. Sert à
                 # lier la réponse de Michel (reply_to_message) à la source.
                 "telegram_msg": "TEXT",
+                # Fenêtre de prédication repérée par le PC (sous-titres ou
+                # transcription maison). Le VPS ne peut PAS la calculer :
+                # YouTube bloque son adresse. Elle est donc calculée là où
+                # c'est possible, puis stockée ici pour qu'il s'en serve.
+                "fenetre_debut_s": "INTEGER",
+                "fenetre_fin_s": "INTEGER",
+                "fenetre_certitude": "TEXT",
+                "fenetre_source": "TEXT",
+                "fenetre_raison": "TEXT",
             },
         }
         for table, colonnes in ajouts.items():

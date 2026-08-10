@@ -322,7 +322,8 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "valider":
             from .valider import valider
             bilan = valider(cfg, db, live=args.live)
-            print(f"Validation : {bilan['lances']} lancé(s), "
+            print(f"Validation : {bilan['lances']} lancé(s) sur GO, "
+                  f"{bilan.get('automatiques', 0)} parti(s) tout seul, "
                   f"{bilan['ecartes']} écarté(s), "
                   f"{bilan['rappels']} rappel(s), "
                   f"{bilan['abandonnes']} abandonné(s), "

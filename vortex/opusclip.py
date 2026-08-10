@@ -355,12 +355,29 @@ def preparer(cfg, src) -> dict:
     if not duree:
         raise OpusError(f"durée inconnue pour {src['youtube_id']}")
 
-    vue = mod_fenetre.trouver(
-        src["youtube_id"], duree,
-        largeur_max_s=cfg.opus_fenetre_max_s,
-        largeur_min_s=cfg.opus_fenetre_min_s,
-        langue=cfg.langue_clipping,
-    )
+    # FENÊTRE DÉJÀ REPÉRÉE ? On la reprend telle quelle.
+    #
+    # Le repérage exige de lire YouTube (sous-titres, ou audio à transcrire),
+    # ce que le serveur ne peut plus faire : son adresse de datacenter est
+    # bloquée. Le PC le fait pour lui (`vortex reperer`) et dépose le
+    # résultat en base. Sans cela, le serveur retomberait sur la règle
+    # proportionnelle et paierait parfois 45 crédits de louange.
+    debut_pret = src["fenetre_debut_s"] if "fenetre_debut_s" in src.keys() else None
+    fin_pret = src["fenetre_fin_s"] if "fenetre_fin_s" in src.keys() else None
+    if debut_pret and fin_pret and fin_pret > debut_pret:
+        vue = {
+            "debut_s": int(debut_pret), "fin_s": int(fin_pret),
+            "certitude": src["fenetre_certitude"] or "moyenne",
+            "raison": src["fenetre_raison"] or "fenêtre repérée à l'avance",
+            "source": src["fenetre_source"] or "repérage PC",
+        }
+    else:
+        vue = mod_fenetre.trouver(
+            src["youtube_id"], duree,
+            largeur_max_s=cfg.opus_fenetre_max_s,
+            largeur_min_s=cfg.opus_fenetre_min_s,
+            langue=cfg.langue_clipping,
+        )
     credits = verifier_fenetre(vue["debut_s"], vue["fin_s"], duree,
                                cfg.opus_credits_max_par_projet)
     demande = construire_demande(

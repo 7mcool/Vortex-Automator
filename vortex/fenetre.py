@@ -217,7 +217,12 @@ def _demander_a_lia(deroule: str, duree_s: int, largeur_max_s: int) -> dict | No
     payload = {
         "model": ai.MODEL,
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 6000,
+        # deepseek-v4-pro RAISONNE avant de répondre : mesuré le 10/08 sur un
+        # sermon de 2 h, 5 817 jetons de raisonnement pour 149 de réponse, soit
+        # 5 966 sur les 6 000 alors autorisés. Un cheveu de plus et le JSON
+        # sortait tronqué — panne silencieuse, la règle prenait le relais sans
+        # que rien ne le signale. D'où la marge.
+        "max_tokens": 8000,
     }
     if "reasoner" not in ai.MODEL:
         payload["response_format"] = {"type": "json_object"}
@@ -263,7 +268,19 @@ CENTRE_SERMON = 0.69
 # Écart maximal toléré entre l'avis de l'IA et celui de la règle. Au-delà, on
 # garde la règle : mesuré le 05/08, elle vise mieux (1 et 7 min d'écart, contre
 # 15 min pour l'IA), et sur MATINÉE 1 l'IA aurait fait rater le sermon entier.
+#
+# Deux seuils depuis le 10/08. Un avis « haute certitude » cite la phrase de
+# transition et situe la fin de la louange : il est d'une autre nature qu'une
+# estimation prudente, et la règle — calibrée sur des conférences de 3 h 30 —
+# n'a pas à l'écraser sur un culte de 2 h. Le garde-fou reste là pour les
+# écarts grossiers (MATINÉE 1 : une heure de décalage), pas pour vingt minutes.
 TOLERANCE_DESACCORD_S = 900
+TOLERANCE_DESACCORD_HAUTE_S = 1500
+
+# Marge ajoutée de chaque côté des bornes trouvées par l'IA. Règle de Michel :
+# un extrait doit porter l'affirmation choc ET son explication entière. Face au
+# doute, mieux vaut acheter trois minutes de trop que couper une démonstration.
+MARGE_SECURITE_S = 180
 
 
 def _fenetre_centree(centre_s: int, largeur_s: int, duree_s: int) -> tuple[int, int]:
@@ -285,15 +302,22 @@ def fenetre_par_defaut(duree_s: int, largeur_max_s: int) -> tuple[int, int, str]
 
 
 def trouver(youtube_id: str, duree_s: int, *, largeur_max_s: int = 4200,
-            largeur_min_s: int = 600, langue: str = "fr") -> dict:
+            largeur_min_s: int = 600, langue: str = "fr",
+            lignes: list[tuple[float, str]] | None = None) -> dict:
     """Fenêtre de prédication d'une vidéo. Ne consomme AUCUN crédit OpusClip.
 
     Retourne {debut_s, fin_s, certitude, raison, source}. La fenêtre est
     toujours bornée : même une réponse aberrante de l'IA ne peut pas produire
     une facture surprise.
+
+    `lignes` permet de fournir un relevé de paroles déjà obtenu autrement —
+    typiquement la transcription maison de `vortex/ecoute.py` quand YouTube
+    n'a pas encore généré ses sous-titres (cas d'un direct qui vient de se
+    terminer, justement celui qu'on veut découper le soir même).
     """
     try:
-        lignes = sous_titres_youtube(youtube_id, langue)
+        if lignes is None:
+            lignes = sous_titres_youtube(youtube_id, langue)
         tranches = resumer_par_tranches(lignes)
         deroule = "\n".join(f"{s}s : {t}" for s, t in tranches)
         log.info("Sous-titres de %s : %d lignes, %d tranches", youtube_id, len(lignes), len(tranches))
@@ -325,30 +349,46 @@ def trouver(youtube_id: str, duree_s: int, *, largeur_max_s: int = 4200,
                        and (fin - debut) >= largeur_min_s
                        and certitude in ("haute", "moyenne"))
         if exploitable:
-            # ARBITRAGE. La règle mesurée est le repère ; l'IA n'est suivie que
-            # si elle la confirme à peu près. Sinon on garde la règle.
+            # ARBITRAGE. La règle mesurée sert de garde-fou, pas d'autorité.
             #
-            # Ce n'est pas de la défiance de principe : mesuré le 05/08, quand
-            # l'IA s'écarte franchement, c'est elle qui se trompe. Sur MATINÉE 1
-            # elle plaçait le message à 1:00 alors qu'il commence à 2:05 — la
-            # suivre aurait fait acheter 45 minutes de louange.
+            # Elle a été calibrée sur trois CONFÉRENCES de 3 h 22 à 3 h 36, où
+            # la prédication vient tard. L'appliquer telle quelle à un culte
+            # du dimanche de 2 h revient à comparer deux formats différents :
+            # le 10/08, elle a écarté un avis « haute certitude » qui citait
+            # la phrase de transition (« j'aimerais partager un message ») et
+            # plaçait la louange jusqu'à 35 min — un avis manifestement juste.
+            #
+            # On garde donc le garde-fou contre les écarts GROSSIERS, seuls
+            # observés en cas de vraie erreur : sur MATINÉE 1 l'IA plaçait le
+            # message une heure trop tôt. Mais on desserre selon la certitude,
+            # car un avis argumenté vaut mieux qu'une moyenne.
             milieu_ia = (debut + fin) // 2
             milieu_regle = int(duree_s * CENTRE_SERMON)
             ecart = abs(milieu_ia - milieu_regle)
-            if ecart <= TOLERANCE_DESACCORD_S:
-                debut, fin = _fenetre_centree(milieu_ia, largeur_max_s, duree_s)
+            tolerance = (TOLERANCE_DESACCORD_HAUTE_S if certitude == "haute"
+                         else TOLERANCE_DESACCORD_S)
+            if ecart <= tolerance:
+                # On respecte les BORNES de l'IA, pas seulement son milieu :
+                # elle a lu où le message commence et où il finit. On ajoute
+                # une marge de sécurité — la règle de Michel veut l'affirmation
+                # ET son explication entière, mieux vaut déborder que couper.
+                debut = max(0, debut - MARGE_SECURITE_S)
+                fin = min(duree_s, fin + MARGE_SECURITE_S)
+                if fin - debut > largeur_max_s:
+                    debut, fin = _fenetre_centree(milieu_ia, largeur_max_s, duree_s)
                 return {"debut_s": debut, "fin_s": fin, "certitude": certitude,
-                        "raison": f"{raison} (confirmée par la règle, écart {ecart // 60} min)",
-                        "source": "transcription + IA"}
-            log.warning("L'IA place le milieu à %ds, la règle à %ds (%d min d'écart) "
-                        "— la règle l'emporte", milieu_ia, milieu_regle, ecart // 60)
+                        "raison": f"{raison} (écart de {ecart // 60} min avec la règle)",
+                        "source": "analyse des paroles", "precise": True}
+            log.warning("L'IA place le milieu à %ds, la règle à %ds (%d min d'écart, "
+                        "tolérance %d min) — la règle l'emporte",
+                        milieu_ia, milieu_regle, ecart // 60, tolerance // 60)
             debut, fin, raison_regle = fenetre_par_defaut(duree_s, largeur_max_s)
             return {"debut_s": debut, "fin_s": fin, "certitude": "moyenne",
                     "raison": f"{raison_regle} — avis de l'IA écarté ({ecart // 60} min d'écart)",
-                    "source": "règle mesurée"}
+                    "source": "règle mesurée", "precise": False}
         log.info("Avis de l'IA inexploitable (%ds→%ds, certitude %s) — règle mesurée",
                  debut, fin, certitude or "?")
 
     debut, fin, raison = fenetre_par_defaut(duree_s, largeur_max_s)
     return {"debut_s": debut, "fin_s": fin, "certitude": "moyenne",
-            "raison": raison, "source": "règle mesurée"}
+            "raison": raison, "source": "règle mesurée", "precise": False}

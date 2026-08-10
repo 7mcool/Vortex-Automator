@@ -135,6 +135,10 @@ fraicheur_max_jours = 12
 sermons_par_jour = 1
 chaines_reservees = ["JACAMESSANLIVE", "lamaisondesagesse"]
 jour_ouverture_autres = 32
+# Sans réponse sur Telegram au bout de ce délai, le sermon part tout seul —
+# à condition que TOUS les principes soient vérifiés (chaîne d'Amessan,
+# prédication repérée et non supposée, plafond du jour, budget du mois).
+delai_auto_h = 3
 
 # ---------------------------------------------------------------------------
 # LIVRAISON PAR COURRIEL

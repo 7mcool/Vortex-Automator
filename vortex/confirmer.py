@@ -41,14 +41,23 @@ def _message_confirmation(plan: dict, credits_restants: int, src: dict,
         f"Orateur : {src.get('pasteur') or 'non identifié'}",
         f"Vidéo : {_hms(plan['duree_s'])} — "
         f"https://www.youtube.com/watch?v={plan['youtube_id']}",
-        f"Fenêtre : {_hms(f['debut_s'])} → {_hms(f['fin_s'])} "
-        f"({duree_f // 60} min) — {f['certitude']}",
+        f"Prédication : {_hms(f['debut_s'])} → {_hms(f['fin_s'])} "
+        f"({duree_f // 60} min)",
         f"Extraits : {plan['demande']['curationPref']['clipDurations'][0][0] // 60}-"
         f"{plan['demande']['curationPref']['clipDurations'][0][1] // 60} min",
         "",
         f"💰 <b>{plan['credits']} crédits</b> "
         f"({credits_restants} restants ce mois-ci)",
     ]
+    # Ce que Michel doit surtout savoir : est-ce qu'on SAIT où est la
+    # prédication, ou est-ce qu'on la devine ? C'est ce qui décide si le
+    # sermon peut partir tout seul en cas de silence.
+    if src.get("fenetre_debut_s"):
+        lignes.append("🎯 Prédication repérée à l'écoute — part tout seul "
+                      "sans réponse de ta part.")
+    else:
+        lignes.append("❓ Prédication SUPPOSÉE (règle des 69 %) — "
+                      "j'attends ta réponse, je ne lance rien seul.")
     # On INFORME du plafond quotidien, on ne bloque pas : un GA de Michel est
     # une décision prise en connaissance du coût, elle prime sur un réglage.
     # Ce qui avait dérapé le 10/08, c'est l'envoi SANS lui demander.
