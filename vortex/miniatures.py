@@ -363,8 +363,41 @@ def fabriquer(cfg, video_yt: dict, fichier_video: Path, formule: str) -> Path | 
     return sortie
 
 
+VERROU = RACINE / "data" / "preparation.lock"
+VERROU_PERIME_S = 4 * 3600
+
+
+def _verrou_libre() -> bool:
+    """Une seule fabrication à la fois sur cette machine.
+
+    La passe planifiée revient toutes les 3 heures ; une fabrication de fond
+    peut durer plus longtemps. Sans ce garde-fou, deux processus
+    téléchargeraient la même vidéo dans le même fichier.
+    """
+    if VERROU.is_file():
+        age = time.time() - VERROU.stat().st_mtime
+        if age < VERROU_PERIME_S:
+            log.info("Une fabrication tourne déjà (depuis %d min) — on passe "
+                     "directement à la pose.", int(age // 60))
+            return False
+        log.warning("Verrou de fabrication périmé (%d h) — ignoré.", int(age // 3600))
+    VERROU.parent.mkdir(parents=True, exist_ok=True)
+    VERROU.write_text(str(os.getpid()), encoding="utf-8")
+    return True
+
+
 def preparer(cfg, cibles: list[dict], journal: dict, combien: int,
              garder_videos: bool) -> int:
+    if not _verrou_libre():
+        return 0
+    try:
+        return _preparer(cfg, cibles, journal, combien, garder_videos)
+    finally:
+        VERROU.unlink(missing_ok=True)
+
+
+def _preparer(cfg, cibles: list[dict], journal: dict, combien: int,
+              garder_videos: bool) -> int:
     faites = 0
     for video in cibles:
         if faites >= combien:
