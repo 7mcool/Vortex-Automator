@@ -69,19 +69,6 @@ def confirmer(cfg: Config, db: Database, limite: int = 1) -> dict:
         return {"proposes": 0, "envoyes": 0, "erreurs": 0,
                 "raison": "TELEGRAM_TOKEN ou TELEGRAM_CHAT absent"}
 
-    # UNE SEULE QUESTION À LA FOIS. Sans ce verrou, chaque passage du cron
-    # (toutes les 30 min) poserait une question de plus tant que Michel n'a
-    # pas répondu : le salon se remplirait, et plusieurs GO d'affilée
-    # partiraient. C'est ce qui s'est produit à la première mise en service —
-    # trois messages d'un coup pour du vieux fonds de catalogue.
-    en_cours = db.conn.execute(
-        "SELECT titre FROM sources_yt WHERE etat = 'A_CONFIRMER' LIMIT 1"
-    ).fetchone()
-    if en_cours:
-        return {"proposes": 0, "envoyes": 0, "erreurs": 0,
-                "raison": "une question attend déjà sa réponse : "
-                          f"{(en_cours['titre'] or '')[:60]}"}
-
     # Budget réel : ce qui a déjà été engagé ce mois.
     maintenant = datetime.now(timezone.utc)
     debut_mois = maintenant.replace(
@@ -121,7 +108,34 @@ def confirmer(cfg: Config, db: Database, limite: int = 1) -> dict:
 
     if not candidates:
         return {"proposes": 0, "envoyes": 0, "erreurs": 0,
-                "raison": tri.get("raison", "aucune source éligible")}
+                "raison": "aucune source éligible"}
+
+    # UNE SEULE QUESTION À LA FOIS — mais le NEUF passe devant.
+    #
+    # Sans verrou, chaque passage du cron (toutes les 30 min) poserait une
+    # question de plus tant que Michel n'a pas répondu : le salon se
+    # remplirait, et plusieurs GO d'affilée partiraient. C'est ce qui s'était
+    # produit à la mise en service — trois messages d'un coup.
+    #
+    # Mais un verrou strict aurait un défaut pire : une vieille question sans
+    # réponse bloquerait le culte du soir. Michel vise toujours le plus frais.
+    # Donc une question en attente ne tient que face à un sermon plus ancien
+    # ou du même jour ; un sermon PLUS RÉCENT la remplace, et l'ancienne
+    # repart en réserve (REPERE) — elle n'est pas perdue, juste doublée.
+    en_cours = db.conn.execute(
+        "SELECT youtube_id, titre, published_at FROM sources_yt "
+        "WHERE etat = 'A_CONFIRMER' ORDER BY published_at DESC LIMIT 1"
+    ).fetchone()
+    if en_cours:
+        attendu = opusclip.publie_ts(en_cours["published_at"])
+        propose = opusclip.publie_ts(candidates[0].get("published_at"))
+        if propose <= attendu:
+            return {"proposes": 0, "envoyes": 0, "erreurs": 0,
+                    "raison": "une question attend déjà sa réponse : "
+                              f"{(en_cours['titre'] or '')[:60]}"}
+        # Le nouveau est plus frais. On ne retire l'ancienne question qu'au
+        # dernier moment, juste avant d'envoyer la nouvelle : si la
+        # préparation échoue, la question en cours reste valable.
 
     bilan = {"proposes": 0, "envoyes": 0, "erreurs": 0}
     for src in candidates[:limite]:
@@ -142,6 +156,18 @@ def confirmer(cfg: Config, db: Database, limite: int = 1) -> dict:
                         src["youtube_id"], plan["credits"], restants)
             bilan["erreurs"] += 1
             continue
+
+        # Le plan tient : on peut retirer la question devenue caduque.
+        if en_cours and en_cours["youtube_id"] != src["youtube_id"]:
+            db.maj_source(en_cours["youtube_id"], etat="REPERE", telegram_msg="")
+            telegram.signaler_action(
+                f"↩️ Question mise de côté — un sermon plus récent est arrivé.\n"
+                f"<i>{(en_cours['titre'] or '')[:80]}</i> retourne en réserve, "
+                f"je le reproposerai après celui-ci."
+            )
+            logger.info("Question supersédée : %s remplacée par %s",
+                        en_cours["youtube_id"], src["youtube_id"])
+            en_cours = None
 
         msg = _message_confirmation(plan, restants, dict(src),
                                     deja_aujourdhui, cfg.opus_sermons_par_jour)
