@@ -220,10 +220,16 @@ def execute_plan(cfg: Config, db: Database, plan: list[dict], live: bool,
             continue
 
         # Aucune reprise silencieuse de la petite cover TikTok.
-        try:
-            youtube_client.set_thumbnail(service, youtube_id, row["thumb_path"])
-        except Exception as exc:
-            log.error("Miniature Vortex refusée pour %s : %s", row["name"], exc)
+        #
+        # `poser_miniature = false` laisse YouTube prendre une image de la
+        # vidéo : c'est la formule choisie par Michel le 10/08, et surtout cela
+        # rend au rattrapage le plafond quotidien de miniatures que les
+        # publications consommaient en entier (voir vortex/config.py).
+        if cfg.poser_miniature:
+            try:
+                youtube_client.set_thumbnail(service, youtube_id, row["thumb_path"])
+            except Exception as exc:
+                log.error("Miniature Vortex refusée pour %s : %s", row["name"], exc)
         if cfg.upload_captions and row["srt_path"] and Path(row["srt_path"]).exists():
             try:
                 youtube_client.upload_captions(service, youtube_id, row["srt_path"],

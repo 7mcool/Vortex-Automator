@@ -47,6 +47,18 @@ class Config:
     notify_subscribers: bool = True
     playlist_id: str = ""
     upload_captions: bool = False  # 400 unités de quota/vidéo — désactivé pour tenir 5/jour
+    # Poser une miniature maison au moment de la publication ?
+    #
+    # ⚠️ YouTube plafonne le nombre de miniatures personnalisées PAR JOUR selon
+    # l'historique de la chaîne (« Développer l'historique de votre chaîne »,
+    # lu dans Studio le 11/08/2026). Sur cette chaîne le plafond tourne autour
+    # de cinq : les publications du jour le mangeaient en entier, et le
+    # rattrapage des 80 anciennes miniatures ne pouvait plus rien poser.
+    #
+    # À false, YouTube choisit lui-même une image de la vidéo — exactement la
+    # formule retenue par Michel le 10/08 — et tout le plafond du jour reste
+    # disponible pour le rattrapage.
+    poser_miniature: bool = True
     # Aimant Facebook : republier chaque clip vertical sur la Page FB (lien YouTube).
     # Désactivé par défaut (éviter de reposter tout le backlog d'un coup) ; activer
     # via config.toml [publish] facebook_publish = true quand prêt.
@@ -186,6 +198,7 @@ def load_config(config_file: Path | None = None) -> Config:
         notify_subscribers=bool(publish.get("notify_subscribers", True)),
         playlist_id=publish.get("playlist_id", ""),
         upload_captions=bool(publish.get("upload_captions", False)),
+        poser_miniature=bool(publish.get("poser_miniature", True)),
         facebook_publish=bool(publish.get("facebook_publish", False)),
         instagram_publish=bool(publish.get("instagram_publish", False)),
         fb_page_id=str(publish.get("fb_page_id", "1203021176235142")),

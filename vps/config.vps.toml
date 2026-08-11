@@ -31,6 +31,16 @@ made_for_kids = false
 notify_subscribers = true
 playlist_id = ""
 upload_captions = false
+# ⚠️ COUPÉ LE 11/08/2026, LE TEMPS DU RATTRAPAGE DES MINIATURES.
+# YouTube plafonne les miniatures personnalisées PAR JOUR selon l'historique
+# de la chaîne (message lu dans Studio : « Développer l'historique de votre
+# chaîne »). Sur celle-ci le plafond tourne autour de cinq par jour : les
+# quatre publications quotidiennes le mangeaient en entier et le rattrapage
+# des 80 anciennes covers tout-texte restait bloqué sur des refus 429.
+# À false, YouTube prend lui-même une image de la vidéo — c'est la formule
+# que Michel a retenue le 10/08. À remettre à true quand le rattrapage sera
+# fini, si le test des deux formules donne l'avantage à « visage + texte ».
+poser_miniature = false
 
 [tiktok]
 # TikTok est maintenant la priorité de distribution : 7 extraits/jour via
