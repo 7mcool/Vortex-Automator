@@ -22,6 +22,7 @@ commence — on cherche un CHANGEMENT DE NATURE du discours, pas un verbatim.
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import subprocess
 import sys
@@ -47,12 +48,25 @@ def _cookies() -> str:
     return _cookies_youtube()
 
 
-def _moteur_js() -> list[str]:
-    """yt-dlp exige un moteur JavaScript pour les défis anti-bot YouTube."""
+def moteur_js() -> list[str]:
+    """yt-dlp exige un moteur JavaScript pour extraire les formats YouTube.
+
+    Sans lui, l'extraction est dégradée et YouTube répond « Please sign in »
+    même avec des cookies valides — constaté le 11/08 sur le PC, qui n'avait
+    ni deno ni node alors que le conteneur du serveur, lui, embarque deno.
+    On regarde donc aussi dans `tools/` du dépôt, où l'on peut le déposer
+    sans toucher au PATH du système ni aux droits d'administration.
+    """
+    local = REPO / "tools" / ("deno.exe" if os.name == "nt" else "deno")
+    if local.is_file():
+        return ["--js-runtimes", f"deno:{local}"]
     for moteur in ("deno", "node", "bun"):
         if shutil.which(moteur):
             return ["--js-runtimes", moteur]
     return []
+
+
+_moteur_js = moteur_js  # ancien nom, conservé pour les appels internes
 
 
 def telecharger_audio(youtube_id: str, dossier: Path) -> Path:

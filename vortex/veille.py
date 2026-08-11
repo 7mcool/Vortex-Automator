@@ -373,6 +373,30 @@ def veiller(cfg: Config, db: Database, *, service=None) -> dict:
     return bilan
 
 
+def video_disponible(cfg: Config, youtube_id: str) -> bool | None:
+    """La vidéo est-elle encore publique ? None si on n'a pas pu vérifier.
+
+    Michel l'avait annoncé, et c'est arrivé le 11/08 : « parfois ils peuvent
+    rendre privé un direct, couper certaines parties et le remettre en ligne
+    en forme de vidéos ». Le culte du soir a disparu deux heures après sa fin.
+
+    Sans ce contrôle, on proposerait à Michel un sermon introuvable — et un GO
+    de sa part lancerait un import voué à l'échec. On préfère l'écarter : la
+    version remontée sera repérée à sa republication, et le contrôle de
+    doublon empêchera de la payer deux fois.
+    """
+    try:
+        from .youtube_client import get_service
+        rep = get_service(cfg).videos().list(part="status", id=youtube_id).execute()
+    except Exception as exc:
+        log.warning("Disponibilité de %s invérifiable : %s", youtube_id, exc)
+        return None
+    items = rep.get("items", [])
+    if not items:
+        return False
+    return items[0].get("status", {}).get("privacyStatus") == "public"
+
+
 def _details_videos(cfg: Config, ids: list[str], *, service=None) -> dict[str, dict]:
     """Durée, direct et vues pour une liste d'identifiants (1 unité / 50 ids)."""
     if service is None:

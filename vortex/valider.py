@@ -100,6 +100,21 @@ def _lancer(cfg: Config, db: Database, src, restants: int, maintenant,
     youtube_id = src["youtube_id"]
     titre = (src["titre"] or "")[:80]
 
+    # LA VIDÉO EXISTE-T-ELLE ENCORE ? Les églises rendent parfois un direct
+    # privé peu après sa fin, pour le remonter et le republier. Lancer un
+    # import sur une vidéo disparue, c'est une tentative perdue — et Michel
+    # verrait un échec sans comprendre pourquoi.
+    from .veille import video_disponible
+    if video_disponible(cfg, youtube_id) is False:
+        db.maj_source(youtube_id, etat="ECARTE",
+                      erreur="vidéo retirée de YouTube avant le découpage")
+        telegram.signaler_action(
+            f"🚫 <b>{titre}</b>\n"
+            f"La chaîne a retiré cette vidéo de YouTube. Rien n'a été dépensé.\n"
+            f"<i>Si elle est remise en ligne montée, je la reprendrai — et le "
+            f"contrôle de doublon évitera de la payer deux fois.</i>")
+        return "ecarte", 0
+
     try:
         plan = opusclip.preparer(cfg, dict(src))
     except opusclip.OpusError as exc:

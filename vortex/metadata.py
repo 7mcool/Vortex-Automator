@@ -216,9 +216,12 @@ def transcript_quality(text: str) -> tuple[bool, str]:
 
 
 def series_meta(path: str | None) -> tuple[int, int]:
-    """Lit (part, total) dans le sidecar {clip}.info.json écrit par le clipper.
-    Retourne (0, 0) si absent — la vidéo n'est pas un extrait de série (ex. les
-    vidéos TikTok d'origine)."""
+    """Lit (part, total) dans le sidecar {clip}.info.json.
+
+    Le découpeur qui écrivait ces sidecars a été supprimé le 31/07/2026 : plus
+    aucune vidéo n'en produit, la fonction retourne donc (0, 0) et le cadrage
+    « Partie i/N » ne s'applique plus. Conservée telle quelle pour les extraits
+    déjà en ligne, dont les sidecars existent encore."""
     if not path:
         return 0, 0
     try:

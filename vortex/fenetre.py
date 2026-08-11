@@ -99,8 +99,9 @@ def sous_titres_youtube(youtube_id: str, langue: str = "fr",
             commande += ["--cookies", cookies]
         # yt-dlp a rendu obligatoire un moteur JavaScript : sans lui, une partie
         # des données de la page n'est plus lisible et l'extraction échoue.
-        if shutil.which("node"):
-            commande += ["--js-runtimes", "node"]
+        # Même moteur JavaScript que pour l'audio : voir ecoute.moteur_js().
+        from .ecoute import moteur_js
+        commande += moteur_js()
         commande.append(f"https://www.youtube.com/watch?v={youtube_id}")
 
         try:

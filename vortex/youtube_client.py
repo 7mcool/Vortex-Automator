@@ -114,6 +114,26 @@ def set_thumbnail(service, youtube_id: str, thumbnail_path: str) -> None:
     ).execute()
 
 
+def reprogrammer(service, youtube_id: str, publish_at_utc: str) -> None:
+    """Change la date de publication d'une vidéo encore privée (50 unités).
+
+    `videos.update` REMPLACE la partie envoyée : on relit donc le statut
+    existant et on ne modifie que la date, sinon des réglages comme
+    « contenu destiné aux enfants » repartiraient à leur valeur par défaut.
+    """
+    reponse = service.videos().list(part="status", id=youtube_id).execute()
+    items = reponse.get("items") or []
+    if not items:
+        raise ValueError(f"vidéo introuvable sur la chaîne : {youtube_id}")
+    statut = items[0]["status"]
+    if statut.get("privacyStatus") != "private":
+        raise ValueError(f"vidéo déjà publique ({statut.get('privacyStatus')}) : {youtube_id}")
+    statut["publishAt"] = publish_at_utc
+    service.videos().update(
+        part="status", body={"id": youtube_id, "status": statut},
+    ).execute()
+
+
 def upload_captions(service, youtube_id: str, srt_path: str, language: str = "fr") -> None:
     from googleapiclient.http import MediaFileUpload
 

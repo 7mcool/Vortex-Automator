@@ -33,3 +33,6 @@ Thumbs.db
 videos/
 cache/
 assets/references-amessan/
+
+# moteur JavaScript pour yt-dlp (binaire, telecharge localement)
+tools/
