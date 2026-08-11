@@ -262,10 +262,21 @@ def veiller(cfg: Config, db: Database, *, service=None) -> dict:
                 continue
             vus_ici.add(e["youtube_id"])
             bilan["vues"] += 1
-            if db.source_connue(e["youtube_id"]):
+            # UNE SOURCE ENREGISTRÉE PENDANT SON DIRECT DOIT ÊTRE REVUE.
+            #
+            # Elle a été inscrite avec la durée partielle du moment et la date
+            # de programmation du live. Tant qu'on la traite comme « déjà
+            # connue », elle garde ces valeurs fausses à vie et n'est jamais
+            # découpée. On la repasse donc dans le circuit tant qu'elle porte
+            # la marque du direct.
+            connue = db.conn.execute(
+                "SELECT is_live, etat FROM sources_yt WHERE youtube_id = ?",
+                (e["youtube_id"],)).fetchone()
+            if connue and not (connue["is_live"] and connue["etat"] == "REPERE"):
                 bilan["deja_connues"] += 1
                 continue
             e["chaine_cfg"] = chaine
+            e["a_rafraichir"] = bool(connue)
             candidats[e["youtube_id"]] = e
 
     if not candidats:
@@ -292,6 +303,16 @@ def veiller(cfg: Config, db: Database, *, service=None) -> dict:
         if not e.get("published_at"):
             e["published_at"] = info.get("publie_le", "")
 
+        # UN DIRECT EST DATÉ PAR SA FIN, PAS PAR SA MISE EN LIGNE.
+        #
+        # Une église crée son direct plusieurs jours à l'avance : le culte du
+        # mardi soir porte la date du dimanche où il a été programmé. Constaté
+        # le 11/08 — le culte qui venait de se terminer était daté du 9, et les
+        # filtres de fraîcheur l'écartaient comme s'il s'agissait d'archives.
+        # Ce qui date un sermon, c'est le moment où il a été prêché.
+        if info.get("fin_direct"):
+            e["published_at"] = info["fin_direct"]
+
         if info.get("direct_en_cours"):
             # Le culte est en train de se dérouler. On ne l'enregistre pas :
             # la prochaine veille le reprendra une fois terminé, avec sa vraie
@@ -306,6 +327,21 @@ def veiller(cfg: Config, db: Database, *, service=None) -> dict:
 
         emp = empreinte(e["titre"])
         emp_lache = empreinte_lache(e["titre"])
+
+        # RAFRAÎCHISSEMENT d'un direct terminé, déjà en base. On corrige la
+        # durée et la date — la recherche de doublon n'a pas lieu d'être, elle
+        # retrouverait la source elle-même et l'écarterait comme sa propre copie.
+        if e.get("a_rafraichir"):
+            db.maj_source(e["youtube_id"], duration_s=duree, is_live=0,
+                          published_at=e["published_at"],
+                          view_count=info["vues"], empreinte=emp,
+                          empreinte_lache=emp_lache)
+            bilan["nouvelles"] += 1
+            log.info("Direct terminé, fiche corrigée : %s — %s (%d min, fin %s)",
+                     e["youtube_id"], e["titre"][:50], duree // 60,
+                     e["published_at"][:16])
+            continue
+
         jumelle, raison = db.empreinte_connue(
             emp, e["published_at"], FENETRE_DOUBLON_JOURS,
             empreinte_lache=emp_lache, duration_s=duree)
@@ -367,6 +403,9 @@ def _details_videos(cfg: Config, ids: list[str], *, service=None) -> dict[str, d
                 # tant qu'il tourne. C'est ce champ, et non la date de mise en
                 # ligne, qui dit qu'un culte est terminé et exploitable.
                 "direct_termine": bool(direct.get("actualEndTime")),
+                # L'heure de FIN du direct. Pour un culte, c'est elle qui date
+                # le sermon — voir plus bas dans veiller().
+                "fin_direct": direct.get("actualEndTime", ""),
                 "direct_en_cours": bool(direct.get("actualStartTime")
                                         and not direct.get("actualEndTime")),
             }
