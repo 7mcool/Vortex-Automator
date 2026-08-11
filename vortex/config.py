@@ -110,6 +110,9 @@ class Config:
     opus_jour_ouverture_autres: int = 24
     # Heures d'attente avant qu'une question sans réponse parte toute seule.
     opus_delai_auto_h: int = 3
+    # Âge maximal d'un sermon pour qu'il puisse partir SANS réponse. Un vieux
+    # sermon demande toujours un GO explicite.
+    opus_fraicheur_auto_jours: int = 2
 
     # Livraison par courriel
     courriel_destinataires: list[str] = field(default_factory=list)
@@ -226,6 +229,7 @@ def load_config(config_file: Path | None = None) -> Config:
         opus_chaines_reservees=list(opus.get("chaines_reservees", [])),
         opus_jour_ouverture_autres=int(opus.get("jour_ouverture_autres", 24)),
         opus_delai_auto_h=int(opus.get("delai_auto_h", 3)),
+        opus_fraicheur_auto_jours=int(opus.get("fraicheur_auto_jours", 2)),
         # Accepte une adresse seule ou une liste : Michel veut recevoir sur
         # deux boîtes (celle de la chaîne et la sienne).
         courriel_destinataires=(

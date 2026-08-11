@@ -57,6 +57,22 @@ def _feu_vert_automatique(cfg: Config, db: Database, src, maintenant) -> tuple[b
     if cfg.opus_chaines_reservees and handle not in cfg.opus_chaines_reservees:
         return False, f"chaîne {handle} hors des chaînes réservées"
 
+    # LE SILENCE NE VAUT ACCORD QUE POUR DU NEUF.
+    #
+    # Le 11/08 à 1 h 30 du matin, un sermon du 3 août est parti tout seul :
+    # il passait tous les autres contrôles, et personne ne dormait pour dire
+    # non. Or Michel ne cesse de le répéter — « on vise les nouveaux ». Un
+    # sermon qui a huit jours n'est plus une actualité : il peut attendre un
+    # accord explicite, il n'y a aucune urgence à le lancer la nuit.
+    publie = opusclip.publie_ts(_champ(src, "published_at", ""))
+    if not publie:
+        return False, "date de publication inconnue"
+    age_jours = (maintenant.timestamp() - publie) / 86400
+    if age_jours > cfg.opus_fraicheur_auto_jours:
+        return False, (f"sermon vieux de {age_jours:.0f} jours "
+                       f"(départ seul réservé aux {cfg.opus_fraicheur_auto_jours} "
+                       f"premiers jours)")
+
     # Le garde-fou décisif. Sans repérage de la prédication, la fenêtre vient
     # de la règle proportionnelle : correcte en moyenne, mais capable de
     # tomber sur la louange. On ne dépense pas 45 crédits sur une supposition

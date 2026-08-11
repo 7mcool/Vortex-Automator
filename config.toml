@@ -193,15 +193,17 @@ genre = "Auto"
 #    ce qui met de côté les 15 conférences Sophos : elles datent de 8 jours,
 #    donc « fraîches » au sens du délai, mais l'événement est passé.
 #
-#    Reculée au 1er août le 10/08, après vérification : sur les deux chaînes
-#    d'Amessan, RIEN n'est publié entre le 1er et le 7 août sauf le sermon du
-#    3 août (« SAGESSE POUR IDENTIFIER ET POURSUIVRE SA DESTINÉE », 1 h 59).
-#    Toutes les conférences Sophos sont antérieures au 1er : elles restent
-#    écartées. La bascule laisse donc passer ce seul sermon, et rien d'autre.
-traiter_a_partir_de = "2026-08-01"
+#    Reculée au 1er août le 10/08 pour attraper le sermon du 3, puis REMISE
+#    au 10 le 11/08 : ce sermon a été traité, et le rouvrir n'aurait servi
+#    qu'à faire remonter du fonds de catalogue. On repart du neuf.
+traiter_a_partir_de = "2026-08-10"
 # 2. LE DÉLAI. Même après la bascule, un sermon qui a dormi plus longtemps que
 #    ceci ne part plus : le budget est trop serré pour rattraper le retard.
-fraicheur_max_jours = 12
+#    Ramené de 12 à 5 jours le 11/08. La bascule est une date FIXE : elle
+#    vieillit, et dans un mois elle laisserait tout repasser. C'est ce délai
+#    glissant qui protège durablement. Amessan publie deux à trois fois par
+#    semaine et la veille tourne toutes les 30 minutes : rien n'échappe.
+fraicheur_max_jours = 5
 # ⚠️ PLAFOND QUOTIDIEN — la leçon du 10/08.
 # Le cycle automatique a dépensé 90 crédits en vingt minutes (deux sermons
 # d'affilée) parce que rien ne bridait la CADENCE : seul le total mensuel
@@ -233,6 +235,13 @@ jour_ouverture_autres = 32
 #
 # La question devient donc un droit de veto : trois heures pour dire NON.
 delai_auto_h = 3
+
+# ⚠️ MAIS LE SILENCE NE VAUT ACCORD QUE POUR DU NEUF.
+# Le 11/08 à 1 h 30, un sermon du 3 août est parti tout seul : il passait tous
+# les contrôles, et personne n'était réveillé pour dire non. Michel : « on vise
+# les nouveaux ». Passé ce délai, un sermon exige un GO explicite — il n'y a
+# aucune urgence à lancer la nuit un sermon d'il y a huit jours.
+fraicheur_auto_jours = 2
 
 # ---------------------------------------------------------------------------
 # LIVRAISON PAR COURRIEL
