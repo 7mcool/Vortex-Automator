@@ -51,7 +51,7 @@ def main(argv: list[str] | None = None) -> int:
         "retry", "engage", "detect-text", "render", "thumbs",
         "story", "backfill-social", "detect-speaker",
         "veille", "clip", "recolter", "livrer", "clips", "tiktok", "opus",
-        "confirmer", "valider",
+        "confirmer", "valider", "habiller",
     ])
     parser.add_argument("--source", default=None,
                         help="`opus` : identifiant YouTube de la vidéo à traiter")
@@ -310,6 +310,16 @@ def main(argv: list[str] | None = None) -> int:
             for clip in db.clips_par_etat("RETENU", limit=10):
                 print(f"  · {clip['score_total'] or 0:>3.0f}/100  "
                       f"{(clip['titre'] or '')[:64]}")
+
+        elif args.command == "habiller":
+            from .habillage import habiller
+            from pathlib import Path as _P
+            if not args.source:
+                print("Usage : vortex habiller --source fichier.mp4")
+                return 1
+            entree = _P(args.source)
+            sortie = entree.with_name(f"{entree.stem}-habille.mp4")
+            print(f"Habillage -> {habiller(entree, sortie)}")
 
         elif args.command == "confirmer":
             from .confirmer import confirmer

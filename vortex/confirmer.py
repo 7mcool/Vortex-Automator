@@ -108,11 +108,30 @@ def confirmer(cfg: Config, db: Database, limite: int = 1) -> dict:
     candidates = []
     for src in toutes:
         row = db.conn.execute(
-            "SELECT telegram_msg FROM sources_yt WHERE youtube_id = ?",
+            "SELECT telegram_msg, fenetre_debut_s FROM sources_yt WHERE youtube_id = ?",
             (src["youtube_id"],),
         ).fetchone()
         if row and row["telegram_msg"]:
             continue  # déjà proposé, on ne renvoie pas
+
+        # ON LAISSE AU PC LE TEMPS D'ÉCOUTER LE SERMON.
+        #
+        # Le repérage tourne sur le PC (le serveur est banni de YouTube) et ne
+        # peut pas commencer avant que YouTube ait fini de traiter le direct —
+        # comptez une à deux heures pour un culte de 2 h 30. Poser la question
+        # avant, c'est l'envoyer avec une fenêtre SUPPOSÉE : Michel lirait un
+        # horaire et un coût qui ne seront plus les bons, et le sermon ne
+        # pourrait pas partir seul faute de repérage.
+        #
+        # Passé ce délai, on demande quand même : mieux vaut une question
+        # imparfaite que pas de question du tout.
+        if not (row and row["fenetre_debut_s"]):
+            age_h = (maintenant.timestamp()
+                     - opusclip.publie_ts(src["published_at"])) / 3600
+            if 0 <= age_h < cfg.opus_attente_reperage_h:
+                logger.info("%s — on attend le repérage du PC (%.1f h < %d h)",
+                            src["youtube_id"], age_h, cfg.opus_attente_reperage_h)
+                continue
         candidates.append(dict(src))
 
     if not candidates:

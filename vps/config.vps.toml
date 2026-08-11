@@ -152,6 +152,12 @@ delai_auto_h = 3
 # exige un GO explicite (le 11/08, un sermon du 3 est parti seul a 1 h 30).
 fraicheur_auto_jours = 2
 
+# Heures laissees au PC pour ecouter le sermon avant qu'on pose la question.
+# YouTube met une a deux heures a rendre telechargeable un direct de 2 h 30 :
+# demander avant, c'est envoyer un horaire et un cout qui ne seront plus les
+# bons, et s'interdire le depart automatique faute de reperage.
+attente_reperage_h = 4
+
 # ---------------------------------------------------------------------------
 # LIVRAISON PAR COURRIEL
 [courriel]
