@@ -359,6 +359,21 @@ def _credit(orateur: str, eglise: str, handle: str) -> str:
 
 
 # ------------------------------------------------------------- publication
+def _creneaux_immediats(nombre: int, espacement_min: int = 12) -> list[datetime]:
+    """Créneaux rapprochés à partir de maintenant, hors grille horaire.
+
+    Michel, 12/08 : « publie aujourd'hui dès la fin du taff », puis « cette
+    nuit ». Le culte s'est terminé tard et il veut ses extraits en ligne dans
+    la foulée, pas étalés sur la journée du lendemain.
+
+    On garde un espacement de quelques minutes : TikTok tolère mal une rafale
+    de publications à la seconde près, et l'algorithme dessert des vidéos qui
+    se cannibalisent en arrivant toutes ensemble.
+    """
+    depart = datetime.now(timezone.utc) + timedelta(minutes=3)
+    return [depart + timedelta(minutes=espacement_min * i) for i in range(nombre)]
+
+
 def _creneaux_tiktok(cfg: Config, db: Database, nombre: int) -> list[datetime]:
     """Prochains créneaux TikTok libres.
 
@@ -455,7 +470,8 @@ def _publier_par_submagic(clip, quand: str) -> dict:
     return submagic.publier(clip["id"], plateformes, planifie_pour=quand)
 
 
-def publier_tiktok(cfg: Config, db: Database, limite: int = 0, *, live: bool = False) -> dict:
+def publier_tiktok(cfg: Config, db: Database, limite: int = 0, *,
+                   live: bool = False, tout_de_suite: bool = False) -> dict:
     """Programme les meilleurs extraits sur TikTok, via Submagic.
 
     L'app TikTok « Sophos Publisher » ayant été refusée le 31/07, l'API TikTok
@@ -493,7 +509,8 @@ def publier_tiktok(cfg: Config, db: Database, limite: int = 0, *, live: bool = F
     if not candidats:
         return {"programmes": 0, "raison": "aucun extrait prêt (sans légende, ou déjà publié)"}
 
-    creneaux = _creneaux_tiktok(cfg, db, len(candidats))
+    creneaux = (_creneaux_immediats(len(candidats)) if tout_de_suite
+                else _creneaux_tiktok(cfg, db, len(candidats)))
     bilan = {"programmes": 0, "echecs": 0, "simulation": not live}
 
     for clip, creneau in zip(candidats, creneaux):

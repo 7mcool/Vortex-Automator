@@ -296,7 +296,7 @@ def main(argv: list[str] | None = None) -> int:
             if not args.live:
                 print("`tiktok` sans --live = simulation. Ajoute --live pour programmer réellement.")
             bilan = publier_tiktok(cfg, db, limite=args.count if args.count != 5 else 0,
-                                   live=args.live)
+                                   live=args.live, tout_de_suite=args.maintenant)
             print(f"TikTok : {bilan}")
 
         elif args.command == "clips":

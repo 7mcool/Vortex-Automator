@@ -33,8 +33,11 @@ python -m vortex valider --live
 # 4. Récolte : extraits finis, tri, SEO. Traite Submagic comme OpusClip.
 python -m vortex recolter
 
-# 5. Publication TikTok, sur la grille de [tiktok] (nuit comprise).
-python -m vortex tiktok --live
+# 5. Publication TikTok — TOUT DE SUITE, hors grille horaire.
+#    Michel, 12/08 : « publie aujourd'hui des la fin du taff », puis « cette
+#    nuit ». Les extraits d'un culte partent donc des leur recolte, espaces de
+#    quelques minutes, au lieu d'attendre les creneaux du lendemain.
+python -m vortex tiktok --live --maintenant
 
 python -m vortex clips
 echo "=== [$(date)] FIN CYCLE SERMONS ==="
