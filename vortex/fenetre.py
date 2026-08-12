@@ -172,11 +172,14 @@ depuis le début, suivi d'un échantillon de ce qui est dit) :
 
 DURÉE TOTALE : {duree} secondes
 
-⚠️ CONTRAINTE ABSOLUE : la fenêtre que tu rends ne doit PAS dépasser \
-{largeur_max} secondes. Si l'enseignement dure plus longtemps, ne rends pas \
-tout : choisis les {largeur_max} secondes les PLUS FORTES — celles où \
-l'orateur assène ses affirmations et les explique. Chaque minute rendue est \
-payée, et une minute de louange payée est une minute perdue.
+⚠️ NE CHOISIS PAS D'EXTRAIT. Donne les BORNES RÉELLES de la prédication, \
+même si elle dure deux heures. Le découpage est fait ensuite, par calcul.
+
+C'est un constat qu'on te demande, pas un avis : où la louange s'arrête, où \
+l'enseignement commence, où il finit. Deux lectures d'un même sermon doivent \
+donner les mêmes bornes. (Demandé auparavant de « choisir les meilleures \
+minutes », le même sermon recevait deux réponses opposées d'un appel à \
+l'autre — l'une et l'autre défendables, ce qui rendait la dépense imprévisible.)
 
 Donne UNIQUEMENT un JSON avec :
 - "fin_louange_s" : entier, seconde où la louange et les chants se terminent \
@@ -186,8 +189,9 @@ OBLIGATOIREMENT après "fin_louange_s". Ce n'est PAS la première citation \
 biblique venue : pendant la louange et les annonces, on cite aussi des \
 versets. Cherche le moment où quelqu'un commence à EXPLIQUER, phrase après \
 phrase, sans qu'on chante entre les phrases.
-- "fin_s" : entier, seconde où l'enseignement s'arrête (avant l'appel, la \
-prière finale, les annonces de clôture).
+- "fin_s" : entier, seconde où l'enseignement s'arrête VRAIMENT (avant \
+l'appel, la prière finale, les offrandes, les annonces de clôture). Donne la \
+fin réelle, sans la raccourcir pour tenir dans une durée.
 - "certitude" : "haute", "moyenne" ou "basse"
 - "raison" : une phrase courte disant à quoi tu as reconnu le début et la fin.
 
@@ -227,7 +231,12 @@ def _demander_a_lia(deroule: str, duree_s: int, largeur_max_s: int) -> dict | No
     }
     if "reasoner" not in ai.MODEL:
         payload["response_format"] = {"type": "json_object"}
-        payload["temperature"] = 1.0
+        # TEMPÉRATURE NULLE : ici on ne cherche pas de la variété, on cherche
+        # un FAIT. Mesuré le 12/08 sur un même sermon, deux appels d'affilée
+        # ont rendu 35→80 min puis 90→135 min, tous deux « haute certitude ».
+        # Les deux tombaient dans la prédication — elle durait 1 h 50 — mais
+        # une décision qui engage 45 crédits ne peut pas dépendre d'un tirage.
+        payload["temperature"] = 0.0
     corps = json.dumps(payload).encode()
 
     for tentative in range(3):
@@ -366,8 +375,38 @@ def trouver(youtube_id: str, duree_s: int, *, largeur_max_s: int = 4200,
             milieu_ia = (debut + fin) // 2
             milieu_regle = int(duree_s * CENTRE_SERMON)
             ecart = abs(milieu_ia - milieu_regle)
-            tolerance = (TOLERANCE_DESACCORD_HAUTE_S if certitude == "haute"
-                         else TOLERANCE_DESACCORD_S)
+
+            # CERTITUDE HAUTE : L'IA A LU, LA RÈGLE NE FAIT QUE SUPPOSER.
+            #
+            # La règle vient de trois CONFÉRENCES de 3 h 30 où la louange
+            # durait 1 h 20. Un culte ordinaire n'a pas cette forme : le
+            # 12/08, sur un culte de 2 h 27, la louange s'arrêtait à 15 min et
+            # la prédication courait de 35 à 80 min. La règle visait 1 h 19 à
+            # 2 h 04 — la fin du message, puis les offrandes et les annonces.
+            # Quarante-cinq crédits pour acheter des annonces.
+            #
+            # L'IA, elle, citait la lecture d'Ecclésiaste 4 — le passage sur
+            # l'amitié, précisément le sujet annoncé par le titre. Ce genre
+            # d'accord entre le texte lu et le sujet ne s'invente pas.
+            #
+            # On ne suit pas l'IA aveuglément pour autant : elle doit avoir
+            # placé la fin de la louange AVANT le début du message (contrôle
+            # ci-dessus), et sa fenêtre doit tenir dans la vidéo. Ce sont des
+            # contrôles de COHÉRENCE INTERNE, qui valent mieux qu'une moyenne.
+            if certitude == "haute":
+                if ecart > TOLERANCE_DESACCORD_HAUTE_S:
+                    log.info("L'IA s'écarte de la règle de %d min mais elle a lu "
+                             "la transcription et se dit sûre — on la suit",
+                             ecart // 60)
+                debut = max(0, debut - MARGE_SECURITE_S)
+                fin = min(duree_s, fin + MARGE_SECURITE_S)
+                if fin - debut > largeur_max_s:
+                    debut, fin = _fenetre_centree(milieu_ia, largeur_max_s, duree_s)
+                return {"debut_s": debut, "fin_s": fin, "certitude": certitude,
+                        "raison": raison, "source": "analyse des paroles",
+                        "precise": True}
+
+            tolerance = TOLERANCE_DESACCORD_S
             if ecart <= tolerance:
                 # On respecte les BORNES de l'IA, pas seulement son milieu :
                 # elle a lu où le message commence et où il finit. On ajoute
