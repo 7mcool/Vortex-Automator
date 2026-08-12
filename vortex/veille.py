@@ -272,11 +272,19 @@ def veiller(cfg: Config, db: Database, *, service=None) -> dict:
             connue = db.conn.execute(
                 "SELECT is_live, etat FROM sources_yt WHERE youtube_id = ?",
                 (e["youtube_id"],)).fetchone()
-            if connue and not (connue["is_live"] and connue["etat"] == "REPERE"):
+            # Deux cas se rouvrent : un direct enregistré pendant sa
+            # diffusion, et une vidéo retirée puis remise en ligne. Dans les
+            # deux cas la fiche est fausse ou périmée, et la laisser « déjà
+            # connue » la condamnerait définitivement.
+            a_revoir = connue and (
+                (connue["is_live"] and connue["etat"] == "REPERE")
+                or connue["etat"] == "INDISPONIBLE")
+            if connue and not a_revoir:
                 bilan["deja_connues"] += 1
                 continue
             e["chaine_cfg"] = chaine
             e["a_rafraichir"] = bool(connue)
+            e["etat_connu"] = connue["etat"] if connue else ""
             candidats[e["youtube_id"]] = e
 
     if not candidats:
@@ -332,14 +340,20 @@ def veiller(cfg: Config, db: Database, *, service=None) -> dict:
         # durée et la date — la recherche de doublon n'a pas lieu d'être, elle
         # retrouverait la source elle-même et l'écarterait comme sa propre copie.
         if e.get("a_rafraichir"):
-            db.maj_source(e["youtube_id"], duration_s=duree, is_live=0,
-                          published_at=e["published_at"],
-                          view_count=info["vues"], empreinte=emp,
-                          empreinte_lache=emp_lache)
+            champs = dict(duration_s=duree, is_live=0,
+                          published_at=e["published_at"], view_count=info["vues"],
+                          empreinte=emp, empreinte_lache=emp_lache)
+            revenue = e.get("etat_connu") == "INDISPONIBLE"
+            if revenue:
+                # Elle est de retour : on la remet en piste, et on efface le
+                # message Telegram précédent pour qu'une question NEUVE soit
+                # posée avec les bons horaires.
+                champs.update(etat="REPERE", erreur="", telegram_msg="")
+            db.maj_source(e["youtube_id"], **champs)
             bilan["nouvelles"] += 1
-            log.info("Direct terminé, fiche corrigée : %s — %s (%d min, fin %s)",
-                     e["youtube_id"], e["titre"][:50], duree // 60,
-                     e["published_at"][:16])
+            log.info("%s : %s — %s (%d min)",
+                     "REVENUE en ligne" if revenue else "Direct terminé, fiche corrigée",
+                     e["youtube_id"], e["titre"][:50], duree // 60)
             continue
 
         jumelle, raison = db.empreinte_connue(

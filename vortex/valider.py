@@ -106,8 +106,14 @@ def _lancer(cfg: Config, db: Database, src, restants: int, maintenant,
     # verrait un échec sans comprendre pourquoi.
     from .veille import video_disponible
     if video_disponible(cfg, youtube_id) is False:
-        db.maj_source(youtube_id, etat="ECARTE",
-                      erreur="vidéo retirée de YouTube avant le découpage")
+        # INDISPONIBLE, et non ECARTE : le retrait est presque toujours
+        # TEMPORAIRE. L'église coupe son direct, le remonte, le republie —
+        # parfois sous la même adresse. Marqué « écarté », le sermon devenait
+        # invisible à la veille pour toujours et personne ne voyait son
+        # retour : c'est exactement ce qui s'est produit le 12/08. La veille
+        # repasse sur cet état à chaque tour et le remet en piste tout seul.
+        db.maj_source(youtube_id, etat="INDISPONIBLE", telegram_msg="",
+                      erreur="retirée de YouTube — reprise dès son retour")
         telegram.signaler_action(
             f"🚫 <b>{titre}</b>\n"
             f"La chaîne a retiré cette vidéo de YouTube. Rien n'a été dépensé.\n"
