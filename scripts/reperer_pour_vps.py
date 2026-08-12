@@ -90,14 +90,25 @@ print(json.dumps([dict(r) for r in lignes]))
 
 
 def deposer_fenetre(youtube_id: str, vue: dict) -> None:
-    """Ecrit la fenetre reperee dans la base du serveur."""
+    """Ecrit la fenetre reperee dans la base du serveur.
+
+    UNE QUESTION DEJA POSEE EST ANNULEE. Le 12/08, Michel a lu sur Telegram
+    « 1h19 -> 2h04 » alors que la base contenait « 1h00 -> 1h45 » : la question
+    etait partie avant le reperage, et la fenetre avait ete corrigee depuis.
+    Le lancement aurait bien utilise la bonne fenetre, mais Michel decidait sur
+    des chiffres faux — il doit pouvoir croire ce qu'il lit. On repasse donc la
+    source en REPERE et on efface le message : une question NEUVE sera posee,
+    avec les bons horaires et le bon cout.
+    """
     code = f"""
 import sqlite3, datetime
 db = sqlite3.connect({DB_VPS!r}, timeout=15)
 db.execute('PRAGMA busy_timeout = 15000')
 db.execute('''UPDATE sources_yt
               SET fenetre_debut_s = ?, fenetre_fin_s = ?, fenetre_certitude = ?,
-                  fenetre_source = ?, fenetre_raison = ?, updated_at = ?
+                  fenetre_source = ?, fenetre_raison = ?, updated_at = ?,
+                  etat = CASE WHEN etat = 'A_CONFIRMER' THEN 'REPERE' ELSE etat END,
+                  telegram_msg = CASE WHEN etat = 'A_CONFIRMER' THEN '' ELSE telegram_msg END
               WHERE youtube_id = ?''',
            ({int(vue['debut_s'])}, {int(vue['fin_s'])},
             {str(vue.get('certitude', ''))[:20]!r},
