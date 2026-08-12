@@ -301,14 +301,33 @@ def _fenetre_centree(centre_s: int, largeur_s: int, duree_s: int) -> tuple[int, 
     return debut, fin
 
 
-def fenetre_par_defaut(duree_s: int, largeur_max_s: int) -> tuple[int, int, str]:
-    """La règle proportionnelle : une fenêtre centrée sur le cœur du sermon.
+# On s'ancre sur la FIN, pas sur le centre. C'est le changement du 12/08, et
+# il repose sur une observation simple : la louange est d'une longueur
+# imprévisible — 15 minutes un mardi soir, 1 h 20 dans une conférence — alors
+# que la clôture, elle, est régulière. Appel, offrandes, annonces et
+# bénédiction occupent toujours à peu près le dernier dixième.
+#
+# Compter depuis la fin élimine donc la seule grandeur vraiment variable.
+# Vérifié sur les deux formes connues :
+#   conférence 3 h 30, prédication 2:00-3:05 → fenêtre 2:24-3:09  ✔
+#   culte 2 h 27,      prédication 0:30-2:15 → fenêtre 1:27-2:12  ✔
+# Les deux tombent dans la prédication, là où la règle des 69 % achetait les
+# annonces du culte du 11/08.
+FIN_PREDICATION = 0.90
 
-    C'est le repère principal, pas un simple secours : à la mesure du 05/08,
-    cette règle visait plus juste que l'analyse de la transcription par l'IA.
+
+def fenetre_par_defaut(duree_s: int, largeur_max_s: int) -> tuple[int, int, str]:
+    """La fenêtre de secours, quand aucune transcription n'est lisible.
+
+    Elle sert quand le repérage n'a pas pu tourner — YouTube bloque le
+    serveur, et le PC de Michel n'est pas toujours allumé. Elle doit donc être
+    assez sûre pour engager 45 crédits sans surveillance.
     """
-    debut, fin = _fenetre_centree(int(duree_s * CENTRE_SERMON), largeur_max_s, duree_s)
-    return debut, fin, f"règle mesurée : cœur du sermon vers {CENTRE_SERMON:.0%} de la vidéo"
+    fin = int(duree_s * FIN_PREDICATION)
+    debut = max(0, fin - largeur_max_s)
+    return debut, fin, (f"règle de secours : la prédication se termine vers "
+                        f"{FIN_PREDICATION:.0%} de la vidéo, on prend les "
+                        f"{largeur_max_s // 60} minutes qui précèdent")
 
 
 def trouver(youtube_id: str, duree_s: int, *, largeur_max_s: int = 4200,

@@ -53,11 +53,10 @@ def _message_confirmation(plan: dict, credits_restants: int, src: dict,
     # prédication, ou est-ce qu'on la devine ? C'est ce qui décide si le
     # sermon peut partir tout seul en cas de silence.
     if src.get("fenetre_debut_s"):
-        lignes.append("🎯 Prédication repérée à l'écoute — part tout seul "
-                      "sans réponse de ta part.")
+        lignes.append("🎯 Prédication repérée à l'écoute du sermon.")
     else:
-        lignes.append("❓ Prédication SUPPOSÉE (règle des 69 %) — "
-                      "j'attends ta réponse, je ne lance rien seul.")
+        lignes.append("📐 Prédication estimée (PC éteint, pas de transcription).")
+    lignes.append("Sans réponse de ta part, ça part tout seul.")
     # On INFORME du plafond quotidien, on ne bloque pas : un GA de Michel est
     # une décision prise en connaissance du coût, elle prime sur un réglage.
     # Ce qui avait dérapé le 10/08, c'est l'envoi SANS lui demander.

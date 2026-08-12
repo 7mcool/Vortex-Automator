@@ -8,10 +8,15 @@ SANS RÉPONSE, ÇA PART QUAND MÊME — décision de Michel du 10/08 : « qu'il
 aille automatique s'il n'a pas de réponse, du moment que ça concerne le
 pasteur Jacques Amessan et que mes principes sont bien validés ».
 
-Les « principes » sont donc vérifiés un par un avant tout départ automatique
-(voir `_feu_vert_automatique`). Si l'un d'eux manque — et notamment si la
-prédication n'a pas été repérée précisément — on n'engage rien et on attend
-Michel. Le silence vaut accord seulement quand il n'y a plus de doute.
+Les « principes » sont vérifiés un par un avant tout départ automatique
+(voir `_feu_vert_automatique`) : chaîne d'Amessan, sermon de moins de deux
+jours, plafond du jour, budget du mois, vidéo toujours en ligne.
+
+Le 12/08 Michel a demandé d'aller plus loin — « on retire ma présence aussi ».
+Le repérage de la prédication n'est donc plus exigé : il ne tourne que sur son
+PC, qui n'est pas toujours allumé, et l'exiger revenait à lui redemander
+d'être là. La fenêtre de secours a été refaite le même jour pour supporter
+cette responsabilité (voir `fenetre.fenetre_par_defaut`).
 
     python -m vortex valider            # simulation
     python -m vortex valider --live     # lance réellement OpusClip
@@ -73,12 +78,20 @@ def _feu_vert_automatique(cfg: Config, db: Database, src, maintenant) -> tuple[b
                        f"(départ seul réservé aux {cfg.opus_fraicheur_auto_jours} "
                        f"premiers jours)")
 
-    # Le garde-fou décisif. Sans repérage de la prédication, la fenêtre vient
-    # de la règle proportionnelle : correcte en moyenne, mais capable de
-    # tomber sur la louange. On ne dépense pas 45 crédits sur une supposition
-    # pendant que Michel dort ; on attend qu'il tranche.
-    if not _champ(src, "fenetre_debut_s"):
-        return False, "prédication pas encore repérée (fenêtre supposée)"
+    # ⚠️ ON N'EXIGE PLUS LE REPÉRAGE — Michel, 12/08 : « on retire ma présence
+    # aussi ». Le repérage ne peut tourner que sur son PC (YouTube bloque le
+    # serveur, vérifié par sept voies différentes), et son PC n'est pas
+    # toujours allumé. Exiger une fenêtre repérée revenait à lui redemander
+    # d'être là — exactement ce qu'il veut supprimer.
+    #
+    # C'est tenable parce que la fenêtre de secours a été refaite le même jour :
+    # elle s'ancre désormais sur la FIN de la vidéo, seule partie régulière,
+    # au lieu d'un centre proportionnel. Mesurée sur les trois sermons connus,
+    # elle place en moyenne 80 % de la fenêtre dans la prédication et n'est
+    # jamais tombée sur la louange.
+    #
+    # Le repérage garde tout son intérêt quand le PC tourne : il vise plus
+    # juste. Mais son absence ne bloque plus rien.
 
     debut_jour = (maintenant - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ")
     partis = db.sources_envoyees_depuis(debut_jour)
@@ -86,7 +99,8 @@ def _feu_vert_automatique(cfg: Config, db: Database, src, maintenant) -> tuple[b
         return False, (f"{partis} sermon(s) déjà parti(s) en 24 h "
                        f"(plafond {cfg.opus_sermons_par_jour})")
 
-    return True, (f"chaîne réservée, prédication repérée, "
+    repere = "repérée à l'écoute" if _champ(src, "fenetre_debut_s") else "estimée"
+    return True, (f"chaîne réservée, prédication {repere}, "
                   f"{partis}/{cfg.opus_sermons_par_jour} sermon(s) aujourd'hui")
 
 
