@@ -43,10 +43,13 @@ upload_captions = false
 poser_miniature = false
 
 [tiktok]
-# TikTok est maintenant la priorité de distribution : 7 extraits/jour via
-# Submagic, séparés des 4 uploads YouTube qui restent contraints par le quota.
-hours = [7, 10, 12, 14, 16, 19, 21]
-daily_limit = 7
+# TOUS LES EXTRAITS D'UN SERMON SORTENT LE JOUR MEME, nuit comprise.
+# Decision de Michel (07/08, redite le 12/08 : « publie aujourd'hui des la fin
+# du taff »). Le serveur etait reste sur une grille de jour commencant a 7 h :
+# un sermon decoupe a 4 h du matin attendait donc trois heures, et le surplus
+# basculait au lendemain. La grille de nuit evite les deux.
+hours = [0, 2, 4, 7, 10, 12, 14, 16, 19, 21]
+daily_limit = 10
 
 [whisper]
 model = "small"
