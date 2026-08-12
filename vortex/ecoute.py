@@ -59,7 +59,14 @@ def moteur_js() -> list[str]:
     """
     local = REPO / "tools" / ("deno.exe" if os.name == "nt" else "deno")
     if local.is_file():
-        return ["--js-runtimes", f"deno:{local}"]
+        # On passe par le PATH plutôt que par la syntaxe `deno:CHEMIN` :
+        # sous Windows le chemin contient déjà un « : » (C:\...) et yt-dlp
+        # coupait au mauvais endroit, si bien qu'il ne trouvait rien et
+        # continuait en mode dégradé sans le dire clairement.
+        dossier = str(local.parent)
+        chemins = os.environ.get("PATH", "")
+        if dossier not in chemins:
+            os.environ["PATH"] = dossier + os.pathsep + chemins
     for moteur in ("deno", "node", "bun"):
         if shutil.which(moteur):
             return ["--js-runtimes", moteur]
