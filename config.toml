@@ -247,7 +247,14 @@ fraicheur_auto_jours = 2
 # YouTube met une a deux heures a rendre telechargeable un direct de 2 h 30 :
 # demander avant, c'est envoyer un horaire et un cout qui ne seront plus les
 # bons, et s'interdire le depart automatique faute de reperage.
-attente_reperage_h = 4
+# 12 h : c'est le delai laisse au PC pour s'allumer et ecouter le sermon.
+# Michel eteint parfois sa machine, et la tache Windows est reglee pour
+# rattraper des l'allumage. Tant que ce delai court, on ne pose pas de
+# question — un sermon reste exploitable cinq jours, rien ne presse.
+# Passe ce delai, on demande quand meme, en signalant que la predication est
+# SUPPOSEE : ce sermon-la n'aura pas le droit de partir tout seul, Michel
+# tranchera depuis son telephone.
+attente_reperage_h = 12
 
 # ---------------------------------------------------------------------------
 # LIVRAISON PAR COURRIEL

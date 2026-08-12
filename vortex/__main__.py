@@ -51,7 +51,7 @@ def main(argv: list[str] | None = None) -> int:
         "retry", "engage", "detect-text", "render", "thumbs",
         "story", "backfill-social", "detect-speaker",
         "veille", "clip", "recolter", "livrer", "clips", "tiktok", "opus",
-        "confirmer", "valider", "habiller",
+        "confirmer", "valider", "habiller", "bilan",
     ])
     parser.add_argument("--source", default=None,
                         help="`opus` : identifiant YouTube de la vidéo à traiter")
@@ -320,6 +320,14 @@ def main(argv: list[str] | None = None) -> int:
             entree = _P(args.source)
             sortie = entree.with_name(f"{entree.stem}-habille.mp4")
             print(f"Habillage -> {habiller(entree, sortie)}")
+
+        elif args.command == "bilan":
+            from .bilan import composer, envoyer
+            print(composer(cfg, db).replace("<b>", "").replace("</b>", "")
+                  .replace("<i>", "").replace("</i>", ""))
+            if args.live:
+                print("\n->", "envoyé sur Telegram" if envoyer(cfg, db)
+                      else "envoi impossible")
 
         elif args.command == "confirmer":
             from .confirmer import confirmer
